@@ -61,7 +61,7 @@ try {
 
     [IO.Directory]::CreateDirectory($stagedMod) | Out-Null
     foreach ($name in @('main.js', 'mod.json', 'windows-directory.js', 'linux-directory.js',
-            'windows-watch.js', 'windows-watch-connection.js', 'linux-watch.js', 'tree-folders.js',
+            'windows-watch.js', 'windows-watch-connection.js', 'linux-watch.js', 'tree-folders.js', 'tree-rows.js',
             'directory-access.js')) {
         Copy-Item -LiteralPath (Join-Path $source $name) -Destination $stagedMod
     }

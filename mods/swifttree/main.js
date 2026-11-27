@@ -4,7 +4,8 @@ import { appHome, checking, exec, nextCommand, pickFolder, readTextFile, spaces,
 import { createDirectoryAccess } from "./directory-access.js";
 import { readLinuxDirectory } from "./linux-directory.js";
 import { readLinuxWatch, reconcileLinuxWatch } from "./linux-watch.js";
-import { isOpenTreeFolder, openedTreeFolders } from "./tree-folders.js";
+import { isOpenTreeFolder, makeEntry, openedTreeFolders, releaseEntry, retainEntry, setFolderListing, setFolderOpen } from "./tree-folders.js";
+import { treeRows } from "./tree-rows.js";
 import { readWindowsDirectory } from "./windows-directory.js";
 import { affectedWindowsFolders } from "./windows-watch.js";
 import { connectWindowsWatcher, readWindowsWatch } from "./windows-watch-connection.js";
@@ -16,10 +17,6 @@ const messages = {
   failed: "Could not read folder",
   empty: "Empty folder",
 };
-
-function makeEntry(path, name, directory, parent = null) {
-  return { path, name, directory, parent, open: false, listing: null, request: null };
-}
 
 function activeSpace() {
   return spaces().find(space => space.active);
@@ -35,20 +32,6 @@ function readDirectory(machine, folder, reason, access) {
     : readWindowsDirectory(exec, appHome(), folder, reason, access);
 }
 
-function appendRows(rows, folder, depth) {
-  const listing = folder.listing;
-  if (!listing) return;
-  if (listing.status !== "ready" || !listing.entries.length) {
-    const label = messages[listing.status === "ready" ? "empty" : listing.status];
-    rows.push({ key: `status:${folder.path}`, depth, label });
-    return;
-  }
-  for (const entry of listing.entries) {
-    rows.push({ key: `entry:${entry.path}`, depth, entry });
-    if (entry.open) appendRows(rows, entry, depth + 1);
-  }
-}
-
 export default class SwiftTree extends View {
   init(_props, cx) {
     this.focus = cx.focus_handle();
@@ -58,6 +41,7 @@ export default class SwiftTree extends View {
     this.rootKey = null;
     this.root = null;
     this.selected = null;
+    this.scrollEntry = null;
     this.preview = null;
     this.previewEditor = null;
     if (!checking()) {
@@ -97,6 +81,7 @@ export default class SwiftTree extends View {
     this.rootKey = key;
     this.root = null;
     this.selected = null;
+    this.scrollEntry = null;
     this.preview = null;
     if (!folder) return;
 
@@ -109,29 +94,11 @@ export default class SwiftTree extends View {
     const initialListing = this.scope.initialListing;
     this.scope.initialListing = null;
     if (initialListing && folder === this.scope.folder) {
-      this.applyListing(this.root, initialListing, machine);
+      setFolderListing(this.root, initialListing, machine ? "/" : "\\");
     }
     if (!initialListing || folder !== this.scope.folder || !machine) {
       this.loadFolder(this.root, cx, "open");
     }
-  }
-
-  applyListing(folder, result, machine) {
-    if (result.status !== "ready") {
-      folder.listing = result;
-      return;
-    }
-
-    const prefix = machine ? folder.path.replace(/\/+$/, "") : folder.path.replace(/[\\/]+$/, "");
-    const separator = machine ? "/" : "\\";
-    const previous = new Map(folder.listing?.entries?.map(entry => [entry.name, entry]));
-    folder.listing = {
-      status: "ready",
-      entries: result.entries.map(({ name, directory }) => {
-        const entry = previous.get(name);
-        return entry?.directory === directory ? entry : makeEntry(`${prefix}${separator}${name}`, name, directory, folder);
-      }),
-    };
   }
 
   loadFolder(folder, cx, reason = "open") {
@@ -151,7 +118,7 @@ export default class SwiftTree extends View {
           resolve(false);
           return;
         }
-        this.applyListing(folder, result, root.machine);
+        setFolderListing(folder, result, root.machine ? "/" : "\\");
         resolve(true);
         cx.notify();
       });
@@ -311,19 +278,19 @@ export default class SwiftTree extends View {
   }
 
   toggle(folder, cx) {
-    folder.open = !folder.open;
+    setFolderOpen(folder, !folder.open);
     if (folder.open) this.loadFolder(folder, cx);
-    else {
-      folder.request = null;
-      folder.listing = null;
-    }
   }
 
-  openFile(entry, rows, cx) {
-    if (!this.preview) {
-      const index = rows.findIndex(row => row.entry === entry);
-      if (index >= 0) this.scroll.scroll_to_item(index, "center");
-    }
+  selectEntry(entry) {
+    if (entry === this.selected) return;
+    releaseEntry(this.selected);
+    this.selected = retainEntry(entry);
+    this.scrollEntry = null;
+  }
+
+  openFile(entry, cx) {
+    if (!this.preview) this.scrollEntry = entry;
     const root = this.root;
     const request = { name: entry.name, status: "Loading preview…" };
     this.preview = request;
@@ -344,27 +311,36 @@ export default class SwiftTree extends View {
     });
   }
 
-  handleKey(key, rows, cx) {
-    const index = rows.findIndex(row => row.entry === this.selected);
-    const entry = rows[index]?.entry;
-    if (key === "up" || key === "down") {
-      const step = key === "down" ? 1 : -1;
-      const start = index < 0 ? (step > 0 ? 0 : rows.length - 1) : index + step;
+  currentEntry(root, row) {
+    const entry = row?.entry;
+    if (entry && this.root === root && entry.parent.listing === row.listing && isOpenTreeFolder(entry.parent, root)) {
+      return row.listing.retained.get(entry.index) ?? entry;
+    }
+  }
+
+  handleKey(key, root, rows, cx) {
+    const index = rows.indexOf(this.selected);
+    const entry = this.currentEntry(root, rows.rowAt(index));
+    if (key === "up" || key === "down" || key === "home" || key === "end") {
+      const step = key === "down" || key === "home" ? 1 : -1;
+      const edge = step > 0 ? 0 : rows.length - 1;
+      const start = index < 0 || key === "home" || key === "end" ? edge : index + step;
       for (let next = start; next >= 0 && next < rows.length; next += step) {
-        if (rows[next].entry) {
-          this.selected = rows[next].entry;
-          this.scroll.scroll_to_item(next, "center");
+        const selected = this.currentEntry(root, rows.rowAt(next));
+        if (selected) {
+          this.selectEntry(selected);
+          this.scrollEntry = selected;
           break;
         }
       }
     } else if ((key === "right" || key === "enter") && entry?.directory && !entry.open) {
       this.toggle(entry, cx);
     } else if (key === "enter" && entry && !entry.directory) {
-      this.openFile(entry, rows, cx);
+      this.openFile(entry, cx);
     } else if (key === "left" && entry?.directory && entry.open) {
       this.toggle(entry, cx);
     } else if (key === "left" && entry?.parent && entry.parent !== this.root) {
-      this.selected = entry.parent;
+      this.selectEntry(entry.parent);
     } else {
       return;
     }
@@ -382,7 +358,7 @@ export default class SwiftTree extends View {
       .when(entry != null, element => element.cursor_pointer().hover(style => style.bg(colors.hover)))
       .child(div().w(13).flex_none().text_color(colors.muted).child(glyph))
       .child(div().flex_1().min_w(0).truncate()
-        .text_color(entry ? colors.foreground : colors.muted).child(entry?.name ?? row.label));
+        .text_color(entry ? colors.foreground : colors.muted).child(entry?.name ?? messages[row.status]));
   }
 
   renderChooser(scope, colors) {
@@ -429,29 +405,42 @@ export default class SwiftTree extends View {
     this.syncRoot(cx);
     const colors = theme();
     const root = this.root;
-    const rows = [];
-    if (root) appendRows(rows, root, 0);
-    const entriesByKey = new Map(rows.filter(row => row.entry).map(row => [row.key, row.entry]));
+    const rows = treeRows(root);
+    // The native list consumes a position during layout. Resolve selection
+    // against the same row projection that is passed to that layout.
+    const scrollIndex = rows.indexOf(this.scrollEntry);
+    this.scrollEntry = null;
+    if (scrollIndex >= 0) this.scroll.scroll_to_item(scrollIndex, "center");
+    const visibleRows = new Map();
 
     const list = v_virtual_list("swifttree-rows", rows.length, 28,
-      index => rows[index].key,
-      range => rows.slice(range.start, range.end).map(row => this.renderRow(row, colors)))
+      index => rows.rowAt(index).key,
+      range => {
+        visibleRows.clear();
+        const elements = [];
+        for (let index = range.start; index < range.end; index++) {
+          const row = rows.rowAt(index);
+          visibleRows.set(row.key, row);
+          elements.push(this.renderRow(row, colors));
+        }
+        return elements;
+      })
       .flex_1().min_h(0).w_full().track_scroll(this.scroll)
       .on_item_click((key, cx) => {
-        if (this.root !== root) return;
-        const entry = entriesByKey.get(key);
+        const row = visibleRows.get(key);
+        const entry = this.currentEntry(root, row);
         if (!entry) return;
         this.focus.focus();
-        this.selected = entry;
+        this.selectEntry(entry);
         if (entry.directory) this.toggle(entry, cx);
-        else this.openFile(entry, rows, cx);
+        else this.openFile(entry, cx);
         cx.notify();
       });
 
     return v_flex().id("swifttree").size_full().min_h(0).rounded(10)
       .overflow_hidden().bg(colors.background).border_1().border_color(colors.border).text_size(13)
       .track_focus(this.focus).on_key_down((event, cx) => {
-        if (root) this.handleKey(event.keystroke, rows, cx);
+        if (root && this.root === root) this.handleKey(event.keystroke, root, treeRows(root), cx);
       })
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(colors.border)
         .child(div().font_semibold().text_color(colors.foreground).child("SwiftTree"))

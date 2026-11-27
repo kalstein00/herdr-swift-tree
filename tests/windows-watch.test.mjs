@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { makeEntry, setFolderListing, setFolderOpen } from "../mods/swifttree/tree-folders.js";
 import { affectedWindowsFolders } from "../mods/swifttree/windows-watch.js";
 
 function folder(path, open, entries = []) {
-  return { path, open, listing: { status: "ready", entries } };
+  const result = makeEntry(path, path.split("\\").at(-1), true);
+  result.open = open;
+  setFolderListing(result, { status: "ready", entries }, "\\");
+  for (const [index, child] of entries.entries()) {
+    Object.assign(child, { parent: result, index });
+    if (child.open) setFolderOpen(child, true);
+  }
+  return result;
 }
 
 test("targets opened parents for a move and all open folders for lost notifications", () => {

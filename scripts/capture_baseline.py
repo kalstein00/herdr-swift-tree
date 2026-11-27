@@ -14,13 +14,15 @@ from windows_capture import WindowsCapture
 
 WM_TIMER = 0x0113
 WH_MOUSE_LL = 14
+WH_KEYBOARD_LL = 13
 MOUSE_ACTIONS = {0x0201: "click", 0x020A: "wheel"}
+NAVIGATION_KEYS = {0x0D: "enter", 0x23: "end", 0x24: "home", 0x28: "down"}
 HookCallback = ctypes.WINFUNCTYPE(
     ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
 )
 
 
-def watch_mouse(hwnd: int, duration_ms: int, events: list[dict]) -> None:
+def watch_input(hwnd: int, duration_ms: int, events: list[dict], navigation_keys: bool) -> None:
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.GetForegroundWindow.restype = wintypes.HWND
     user32.SetWindowsHookExW.argtypes = (
@@ -37,17 +39,30 @@ def watch_mouse(hwnd: int, duration_ms: int, events: list[dict]) -> None:
     user32.KillTimer.argtypes = (wintypes.HWND, ctypes.c_size_t)
 
     @HookCallback
-    def observe(code, event, data):
+    def observe_mouse(code, event, data):
         action = MOUSE_ACTIONS.get(event)
         if code >= 0 and action and user32.GetForegroundWindow() == hwnd:
             events.append({"action": action, "qpc_ns": time.perf_counter_ns()})
         return user32.CallNextHookEx(None, code, event, data)
 
-    hook = user32.SetWindowsHookExW(WH_MOUSE_LL, observe, None, 0)
-    if not hook:
+    @HookCallback
+    def observe_keyboard(code, event, data):
+        if code >= 0 and event == 0x0100 and user32.GetForegroundWindow() == hwnd:
+            key = ctypes.cast(data, ctypes.POINTER(wintypes.DWORD)).contents.value
+            if key in NAVIGATION_KEYS:
+                events.append({"action": NAVIGATION_KEYS[key], "qpc_ns": time.perf_counter_ns()})
+        return user32.CallNextHookEx(None, code, event, data)
+
+    mouse_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, observe_mouse, None, 0)
+    if not mouse_hook:
         raise ctypes.WinError(ctypes.get_last_error())
 
+    keyboard_hook = None
     try:
+        if navigation_keys:
+            keyboard_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, observe_keyboard, None, 0)
+            if not keyboard_hook:
+                raise ctypes.WinError(ctypes.get_last_error())
         timer = user32.SetTimer(None, 0, duration_ms, None)
         if not timer:
             raise ctypes.WinError(ctypes.get_last_error())
@@ -64,7 +79,9 @@ def watch_mouse(hwnd: int, duration_ms: int, events: list[dict]) -> None:
         finally:
             user32.KillTimer(None, timer)
     finally:
-        user32.UnhookWindowsHookEx(hook)
+        if keyboard_hook:
+            user32.UnhookWindowsHookEx(keyboard_hook)
+        user32.UnhookWindowsHookEx(mouse_hook)
 
 
 def main() -> None:
@@ -72,6 +89,7 @@ def main() -> None:
     parser.add_argument("hwnd", type=int)
     parser.add_argument("output", type=Path)
     parser.add_argument("--seconds", type=int, default=15)
+    parser.add_argument("--navigation-keys", action="store_true", help="also record Home, End, Down and Enter in the benchmark window")
     parser.add_argument("--crop", type=int, nargs=4, required=True, metavar=("X", "Y", "WIDTH", "HEIGHT"))
     args = parser.parse_args()
     x, y, width, height = args.crop
@@ -103,7 +121,7 @@ def main() -> None:
 
     controller = capture.start_free_threaded()
     try:
-        watch_mouse(args.hwnd, args.seconds * 1_000, events)
+        watch_input(args.hwnd, args.seconds * 1_000, events, args.navigation_keys)
     finally:
         controller.stop()
         controller.wait()
@@ -118,7 +136,7 @@ def main() -> None:
         metadata.append({"file": name, "qpc_ns": timestamp})
     result = {"hwnd": args.hwnd, "crop": args.crop, "inputs": events, "frames": metadata}
     (args.output / "events.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    print(f"Recorded {len(events)} mouse events and {len(frames)} changed frames.")
+    print(f"Recorded {len(events)} input events and {len(frames)} changed frames.")
 
 
 if __name__ == "__main__":
