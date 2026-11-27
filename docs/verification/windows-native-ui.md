@@ -1,0 +1,58 @@
+# Windows Herdr UI 검증
+
+[검증 경로 확인 #2](https://github.com/kalstein00/herdr-swift-tree/issues/2)에서 합의한 Windows 네이티브 검증 도구는 Windows Computer Use다. Windows Herdr 창을 대상으로 클릭, 스크롤, 키보드 입력을 보낸다. 기본 Files에서 클릭과 스크롤을 검증하고 같은 창의 명령 팔레트에서 키보드 선택 이동을 검증한다. SwiftTree의 트리 키보드 동작은 해당 SwiftTree 후보에서 검증한다.
+
+## 격리된 검증 창 준비
+
+Windows에 설치된 Herdr에서 PowerShell로 다음을 실행한다. Herdr가 다른 위치에 설치되어 있으면 `$app`을 설치된 실행 파일 경로로 지정한다. 이후 명령에도 새 프로필과 코어 설정이 적용되도록 같은 PowerShell 세션을 사용한다.
+
+```powershell
+$app = Join-Path $env:LOCALAPPDATA 'Programs\herdr-app\herdr-app.exe'
+$runId = [guid]::NewGuid().ToString('N').Substring(0, 8)
+$scratch = Join-Path ([System.IO.Path]::GetTempPath()) "st-ui-$runId"
+$tree = Join-Path $scratch 'synthetic-tree'
+$branch = Join-Path $tree 'alpha\branch'
+New-Item -ItemType Directory -Path $branch -Force | Out-Null
+foreach ($row in 1..75) {
+    $name = 'row-{0:D3}.txt' -f $row
+    Set-Content -LiteralPath (Join-Path $branch $name) -Value 'SwiftTree synthetic UI fixture'
+}
+
+$env:HERDR_APP_HOME = Join-Path $scratch 'app'
+$env:HC_SESSION = "st-ui-$runId"
+$env:XDG_CONFIG_HOME = Join-Path $scratch 'config'
+$env:XDG_STATE_HOME = Join-Path $scratch 'state'
+$env:HC_SOCKET = $null
+
+& $app --version
+$windowProcess = Start-Process -FilePath $app -WorkingDirectory $tree -WindowStyle Normal -PassThru
+$windowProcess.Id
+```
+
+새 창에 Herdr 환영 화면이 표시될 때까지 기다린다. 다음 명령으로 합성 폴더를 space에 연결한다. `ls`에서 `SwiftTree UI fixture`가 활성 space이고 `folder`가 생성한 합성 폴더인지 확인한다. 레이아웃을 사용할 수 없다는 메시지가 나오면 로컬 코어 연결을 확인한 뒤 `space.new`를 다시 시도한다.
+
+```powershell
+& $app do space.new --name 'SwiftTree UI fixture' --folder $tree
+& $app ls
+```
+
+Computer Use에서 실행한 프로세스의 창을 선택한다. 기존 Herdr 창도 열려 있으면 프로세스의 `MainWindowHandle`을 확인하고 목록에 반환된 창 ID와 대조한다. 클릭 위치와 포커스는 각 동작 직전의 화면으로 확인한다.
+
+## 사용자 경로와 관측 기준
+
+| 동작 | 화면에서 확인할 결과 |
+| --- | --- |
+| 상단 `Files` 버튼을 클릭한다. | 합성 루트와 접힌 `alpha`가 표시된다. |
+| `alpha`를 펼쳐 `branch`를 클릭한다. | 두 폴더가 펼쳐지고 `row-001.txt`부터 파일이 표시된다. |
+| Files 목록 안에서 아래로 스크롤한다. | 보이는 목록 범위가 바뀌고 끝에서 `row-075.txt`가 나타난다. |
+| `Ctrl+Shift+P`로 명령 팔레트를 열고 `↓`를 누른다. | 팔레트 선택이 `New tab`에서 `Go to space or tab...`으로 이동한다. |
+
+접힌 목록, 펼친 목록, 마지막 행, 팔레트 선택을 캡처하고 각각 직접 열어 행 이름, 펼침 상태, 포커스와 배치를 검사한다. 기본 Files 행 위의 하이라이트는 포인터 호버 상태로 기록한다. 검증 기록에 저장소 후보, Herdr App과 core 버전, OS 빌드, 창 크기, 조작 순서, 관측 결과, 이미지 보관 위치를 남긴다.
+
+## #2 결과
+
+Windows 11 Pro 빌드 26300에서 Herdr App 0.1.18, core 0.1.22, 기본 레이아웃과 Files를 사용했다. 네이티브 프레임 크기는 1600×1025였다. 위 네 동작을 같은 창에서 수행했고, 접힌 목록부터 마지막 행과 팔레트 선택까지 네 화면을 열어 확인했다. 캡처는 작업의 로컬 아티팩트에 보관했다.
+
+Agent Browser 0.45.0의 `connect`는 실제 Herdr를 대상으로 쓸 수 없었다. 실행 중인 Herdr 프로세스에는 TCP 수신 포트가 없었고, 설치본은 `--remote-debugging-port`를 알 수 없는 인자로 처리했다. 비어 있는 로컬 포트로 실행한 연결 시도는 CDP와 BiDi 탐색에 실패해 종료 코드 1을 반환했다. [Agent Browser 연결 방식](https://agent-browser.dev/cdp-mode)
+
+Herdr App 0.1.18의 기본 Files는 포인터 클릭으로 행을 열며, 방향키로 이동하는 행 선택 상태를 제공하지 않는다. SwiftTree 트리의 방향키 이동, 원격 탐색과 성능은 해당 기능이 설치된 후보에서 확인한다. [기본 Files 행과 스크롤 영역 구현](https://github.com/herdrdev/herdr-app/blob/9a9ae13d998e6ed74c76e8eb13bdeb2e1420f50c/defaults/mods/files/main.js#L252-L280)
