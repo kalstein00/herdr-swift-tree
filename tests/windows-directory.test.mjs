@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { readWindowsDirectory } from "../mods/swifttree/windows-directory.js";
+import { buildWindowsReader } from "./native-windows-reader.mjs";
 
 const run = promisify(execFile);
 async function exec(file, args) {
@@ -17,6 +18,7 @@ test("reads literal NTFS paths and follows the default numeric Explorer collatio
   const root = await mkdtemp(join(temp, "swift-tree-test-"));
   assert.equal(dirname(await realpath(root)), temp);
   context.after(() => rm(root, { recursive: true, force: true }));
+  await buildWindowsReader(root);
   const folder = join(root, "O'Brien’s [fixtures] & files");
   await mkdir(folder);
 
@@ -31,7 +33,7 @@ test("reads literal NTFS paths and follows the default numeric Explorer collatio
     ...folders.sort(compare).map(name => ({ name, directory: true })),
     ...files.sort(compare).map(name => ({ name, directory: false })),
   ];
-  assert.deepEqual(await readWindowsDirectory(exec, folder), { status: "ready", entries: expected });
-  assert.deepEqual(await readWindowsDirectory(exec, join(folder, "Zeta")), { status: "ready", entries: [] });
-  assert.deepEqual(await readWindowsDirectory(exec, join(folder, "missing")), { status: "missing" });
+  assert.deepEqual(await readWindowsDirectory(exec, root, folder), { status: "ready", entries: expected });
+  assert.deepEqual(await readWindowsDirectory(exec, root, join(folder, "Zeta")), { status: "ready", entries: [] });
+  assert.deepEqual(await readWindowsDirectory(exec, root, join(folder, "missing")), { status: "missing" });
 });

@@ -1,19 +1,23 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readdir, rmdir } from "node:fs/promises";
+import { mkdtemp, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { readLinuxDirectory } from "../mods/swifttree/linux-directory.js";
+import { buildWindowsReader } from "./native-windows-reader.mjs";
 
 const run = promisify(execFile);
 const folder = "/home/bench/Notes’ List\\fixtures";
 const machine = "registered-linux";
 
 test("routes the literal Linux path and preserves ordered names and types", async context => {
-  const appHome = await mkdtemp(join(tmpdir(), "swift-tree-linux-test-"));
-  context.after(() => rmdir(appHome));
+  const temp = await realpath(tmpdir());
+  const appHome = await mkdtemp(join(temp, "swift-tree-linux-test-"));
+  assert.equal(dirname(await realpath(appHome)), temp);
+  context.after(() => rm(appHome, { recursive: true, force: true }));
+  await buildWindowsReader(appHome);
 
   const encoded = Buffer.from("ffile10\0dFolder02\0f파일\nname\0dFolder2\0ffile2\0\0").toString("base64");
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -40,5 +44,5 @@ test("routes the literal Linux path and preserves ordered names and types", asyn
     const response = { code: 0, stdout: bytes.toString("base64") };
     assert.deepEqual(await readLinuxDirectory(reader(response), appHome, folder, machine), { status: "failed" });
   }
-  assert.deepEqual(await readdir(appHome), []);
+  assert.deepEqual(await readdir(appHome), ["mods"]);
 });

@@ -3,6 +3,8 @@ import { Button, Editor, EditorState, h_flex, Input, InputState, Scrollbar, v_fl
 import { appHome, checking, exec, nextCommand, pickFolder, readTextFile, spaces, theme } from "herdr";
 import { readLinuxDirectory } from "./linux-directory.js";
 import { readWindowsDirectory } from "./windows-directory.js";
+import { affectedWindowsFolders } from "./windows-watch.js";
+import { connectWindowsWatcher, readWindowsWatch } from "./windows-watch-connection.js";
 
 const messages = {
   loading: "Loading folder…",
@@ -13,7 +15,7 @@ const messages = {
 };
 
 function makeEntry(path, name, directory, parent = null) {
-  return { path, name, directory, parent, open: false, listing: null };
+  return { path, name, directory, parent, open: false, listing: null, request: null };
 }
 
 function activeSpace() {
@@ -24,8 +26,10 @@ function choiceKey(space) {
   return space ? JSON.stringify(["swifttree-root", space.machine ?? null, space.id]) : null;
 }
 
-function readDirectory(machine, folder) {
-  return machine ? readLinuxDirectory(exec, appHome(), folder, machine) : readWindowsDirectory(exec, folder);
+function readDirectory(machine, folder, reason) {
+  return machine
+    ? readLinuxDirectory(exec, appHome(), folder, machine)
+    : readWindowsDirectory(exec, appHome(), folder, reason);
 }
 
 function appendRows(rows, folder, depth) {
@@ -47,6 +51,7 @@ export default class SwiftTree extends View {
     this.focus = cx.focus_handle();
     this.scroll = VirtualListScrollHandle.new();
     this.scope = null;
+    this.watching = null;
     this.rootKey = null;
     this.root = null;
     this.selected = null;
@@ -84,6 +89,7 @@ export default class SwiftTree extends View {
     const key = folder ? JSON.stringify([storageKey, folder]) : null;
     if (this.rootKey === key) return;
 
+    this.stopWindowsWatch();
     this.rootKey = key;
     this.root = null;
     this.selected = null;
@@ -94,34 +100,96 @@ export default class SwiftTree extends View {
     const name = folder.split(pathSeparator).filter(Boolean).at(-1) || folder;
     this.root = makeEntry(folder, name, true);
     this.root.machine = machine;
+    if (!machine) this.startWindowsWatch(this.root, cx);
     const initialListing = this.scope.initialListing;
     this.scope.initialListing = null;
     if (initialListing && folder === this.scope.folder) {
       this.applyListing(this.root, initialListing, machine);
-    } else {
-      this.loadFolder(this.root, cx);
+    }
+    if (!initialListing || folder !== this.scope.folder || !machine) {
+      this.loadFolder(this.root, cx, "open");
     }
   }
 
   applyListing(folder, result, machine) {
+    if (result.status !== "ready") {
+      folder.listing = result;
+      return;
+    }
+
     const prefix = machine ? folder.path.replace(/\/+$/, "") : folder.path.replace(/[\\/]+$/, "");
     const separator = machine ? "/" : "\\";
-    folder.listing = result.status === "ready" ? {
+    const previous = new Map(folder.listing?.entries?.map(entry => [entry.name, entry]));
+    folder.listing = {
       status: "ready",
-      entries: result.entries.map(({ name, directory }) =>
-        makeEntry(`${prefix}${separator}${name}`, name, directory, folder)),
-    } : result;
+      entries: result.entries.map(({ name, directory }) => {
+        const entry = previous.get(name);
+        return entry?.directory === directory ? entry : makeEntry(`${prefix}${separator}${name}`, name, directory, folder);
+      }),
+    };
   }
 
-  loadFolder(folder, cx) {
+  loadFolder(folder, cx, reason = "open") {
     const root = this.root;
-    const request = { status: "loading" };
-    folder.listing = request;
+    const request = {};
+    folder.request = request;
+    folder.listing ??= { status: "loading" };
     cx.spawn(async cx => {
-      const result = await readDirectory(root.machine, folder.path);
-      if (this.root !== root || folder.listing !== request) return;
+      const result = await readDirectory(root.machine, folder.path, reason);
+      if (this.root !== root || folder.request !== request) return;
+      folder.request = null;
       this.applyListing(folder, result, root.machine);
       cx.notify();
+    });
+  }
+
+  stopWindowsWatch() {
+    const watch = this.watching;
+    this.watching = null;
+    this.closeWatchSocket(watch);
+    watch?.retry?.cancel();
+  }
+
+  closeWatchSocket(watch) {
+    const socket = watch?.socket;
+    if (!socket) return;
+    watch.socket = null;
+    socket.close();
+  }
+
+  reloadWindowsFolders(root, paths, cx) {
+    const { reason, folders } = affectedWindowsFolders(root, paths);
+    for (const folder of folders) this.loadFolder(folder, cx, reason);
+  }
+
+  startWindowsWatch(root, cx, recovering = false) {
+    const watch = {};
+    this.watching = watch;
+    const current = () => this.watching === watch && this.root === root;
+    cx.spawn(async cx => {
+      try {
+        watch.socket = await connectWindowsWatcher(root.path, current, cx);
+        if (!current() || !watch.socket) return;
+        const { folders } = affectedWindowsFolders(root, []);
+        for (const folder of folders) this.loadFolder(folder, cx, recovering ? "recovery" : "watch-start");
+        if (root.watchUnavailable) {
+          root.watchUnavailable = false;
+          cx.notify();
+        }
+        await readWindowsWatch(watch.socket, paths => {
+          if (current()) this.reloadWindowsFolders(root, paths, cx);
+        });
+      } catch {
+        // A broken connection always takes the same recovery path.
+      } finally {
+        this.closeWatchSocket(watch);
+      }
+      if (!current()) return;
+      root.watchUnavailable = true;
+      cx.notify();
+      watch.retry = cx.timer.after(1500, cx => {
+        if (current()) this.startWindowsWatch(root, cx, true);
+      });
     });
   }
 
@@ -164,7 +232,7 @@ export default class SwiftTree extends View {
         const folder = remotePath ?? await pickFolder({ prompt: "Open folder" });
         if (!folder || !this.canChoose(scope)) return;
 
-        const listing = await readDirectory(scope.machine, folder);
+        const listing = await readDirectory(scope.machine, folder, "validate");
         if (!this.canChoose(scope)) return;
         if (listing.status !== "ready") {
           scope.error = messages[listing.status];
@@ -193,7 +261,10 @@ export default class SwiftTree extends View {
   toggle(folder, cx) {
     folder.open = !folder.open;
     if (folder.open) this.loadFolder(folder, cx);
-    else folder.listing = null;
+    else {
+      folder.request = null;
+      folder.listing = null;
+    }
   }
 
   openFile(entry, rows, cx) {
@@ -223,7 +294,7 @@ export default class SwiftTree extends View {
 
   handleKey(key, rows, cx) {
     const index = rows.findIndex(row => row.entry === this.selected);
-    const entry = this.selected;
+    const entry = rows[index]?.entry;
     if (key === "up" || key === "down") {
       const step = key === "down" ? 1 : -1;
       const start = index < 0 ? (step > 0 ? 0 : rows.length - 1) : index + step;
@@ -333,6 +404,7 @@ export default class SwiftTree extends View {
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(colors.border)
         .child(div().font_semibold().text_color(colors.foreground).child("SwiftTree"))
         .child(div().flex_1().min_w(0).truncate().text_right().text_color(colors.muted).child(this.root?.name ?? "")))
+      .when(root?.watchUnavailable, panel => panel.child(div().px(14).py(5).text_color(colors.muted).child("Live updates unavailable")))
       .child(root ? v_flex().relative().flex_1().min_h(0).p(6)
         .child(list)
         .child(Scrollbar.vertical("swifttree-rows").absolute().inset_0()) : this.renderChooser(this.scope, colors))

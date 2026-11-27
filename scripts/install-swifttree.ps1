@@ -60,9 +60,11 @@ try {
     }
 
     [IO.Directory]::CreateDirectory($stagedMod) | Out-Null
-    foreach ($name in @('main.js', 'mod.json', 'windows-directory.js', 'linux-directory.js')) {
+    foreach ($name in @('main.js', 'mod.json', 'windows-directory.js', 'linux-directory.js',
+            'windows-watch.js', 'windows-watch-connection.js')) {
         Copy-Item -LiteralPath (Join-Path $source $name) -Destination $stagedMod
     }
+    & (Join-Path $PSScriptRoot 'build-swifttree-windows.ps1') -OutputPath (Join-Path $stagedMod 'swifttree-windows.exe')
 
     if ($blocks[0].content.mod -ne 'swifttree') {
         $blocks[0].content.mod = 'swifttree'
@@ -104,7 +106,17 @@ catch {
 finally {
     try {
         if (-not $keepStaging -and [IO.Directory]::Exists($staging)) {
-            Remove-Item -LiteralPath $staging -Recurse -Force
+            for ($attempt = 0; ; $attempt++) {
+                try {
+                    Remove-Item -LiteralPath $staging -Recurse -Force
+                    break
+                }
+                catch [IO.IOException], [UnauthorizedAccessException] {
+                    # The previous native watcher exits when the old Mod's socket closes.
+                    if ($attempt -ge 20) { throw }
+                    Start-Sleep -Milliseconds 100
+                }
+            }
         }
     }
     finally {

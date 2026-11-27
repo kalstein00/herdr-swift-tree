@@ -45,7 +45,7 @@ export async function readLinuxDirectory(exec, appHome, folder, machine) {
     await mkdir(scratch);
     try {
       await writeFile(listingPath, response.stdout);
-      return await sortLinuxListing(exec, listingPath);
+      return await sortLinuxListing(exec, appHome, listingPath);
     } finally {
       await unlink(listingPath).catch(() => {});
       await rmdir(scratch).catch(() => {});
