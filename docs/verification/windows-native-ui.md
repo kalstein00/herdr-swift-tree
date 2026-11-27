@@ -56,3 +56,19 @@ Windows 11 Pro 빌드 26300에서 Herdr App 0.1.18, core 0.1.22, 기본 레이�
 Agent Browser 0.45.0의 `connect`는 실제 Herdr를 대상으로 쓸 수 없었다. 실행 중인 Herdr 프로세스에는 TCP 수신 포트가 없었고, 설치본은 `--remote-debugging-port`를 알 수 없는 인자로 처리했다. 비어 있는 로컬 포트로 실행한 연결 시도는 CDP와 BiDi 탐색에 실패해 종료 코드 1을 반환했다. [Agent Browser 연결 방식](https://agent-browser.dev/cdp-mode)
 
 Herdr App 0.1.18의 기본 Files는 포인터 클릭으로 행을 열며, 방향키로 이동하는 행 선택 상태를 제공하지 않는다. SwiftTree 트리의 방향키 이동, 원격 탐색과 성능은 해당 기능이 설치된 후보에서 확인한다. [기본 Files 행과 스크롤 영역 구현](https://github.com/herdrdev/herdr-app/blob/9a9ae13d998e6ed74c76e8eb13bdeb2e1420f50c/defaults/mods/files/main.js#L252-L280)
+
+## SwiftTree의 Windows 로컬 탐색 검증
+
+Herdr App 0.1.18의 격리된 레이아웃에서 `scripts/install-swifttree.ps1`의 `-AppHome`에 대상 프로필을 지정한다. 홈 아래와 홈 밖 NTFS 폴더를 각각 space의 시작 폴더로 지정한다. 합성 폴더에는 숫자가 붙은 폴더·파일 이름, 파일이 든 하위 폴더, 빈 폴더, 테스트 계정의 열거 권한을 거부한 폴더, 읽기 중 삭제할 폴더를 둔다. 각 위치의 파일을 독립적으로 열거해 기대 목록을 기록한다.
+
+1. 상단 Files 버튼으로 SwiftTree를 열고 처음 보이는 행과 파일·폴더 순서를 비교한다. 폴더를 펼친 뒤 `↓`로 자식 행을 선택한다. 이름에 곡선형 아포스트로피가 있는 폴더도 펼쳐 자식 파일을 확인한다.
+2. 한 터미널에서 다른 폴더로 이동한 뒤 다른 폴더를 시작 위치로 한 pane에 포커스를 옮겨 본다. 트리에 해당 space의 원래 목록이 보이는지 확인한다.
+3. 빈 폴더, 읽기 권한이 없는 폴더, 목록을 요청한 뒤 삭제된 폴더를 열어 각각의 문구를 확인한다.
+4. `Ctrl+Shift+P`에서 `layout`을 검색하고 `Layout: Herdr`로 전환한다. Files 버튼으로 기본 패널을 닫았다가 다시 연다.
+
+실제 창에서 저장한 PNG의 패널 영역에서 제목과 행 순서를 확인할 수 있다. 아래 좌표는 1600×1025 네이티브 프레임의 오른쪽 패널 예다. 창 크기가 다르면 해당 패널에 맞춰 좌표를 지정한다. OCR은 텍스트 순서를 확인하며 포커스와 선택 상태는 이미지를 직접 열어 검사한다.
+
+```powershell
+uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --with winrt-Windows.Graphics.Imaging --with winrt-Windows.Storage --with winrt-Windows.Storage.Streams python tests/assert_herdr_panel.py <capture.png> SwiftTree Folder02 alpha.txt --crop 1130 50 455 620
+node --test tests/windows-directory.test.mjs
+```
