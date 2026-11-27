@@ -1,6 +1,7 @@
 import { View, div } from "gpui-kit";
 import { h_flex, Scrollbar, v_flex, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
-import { checking, exec, nextCommand, spaces, theme } from "herdr";
+import { appHome, checking, exec, nextCommand, spaces, theme } from "herdr";
+import { readLinuxDirectory } from "./linux-directory.js";
 import { readWindowsDirectory } from "./windows-directory.js";
 
 const messages = {
@@ -48,8 +49,9 @@ export default class SwiftTree extends View {
   syncRoot(cx) {
     if (checking()) return;
     const space = spaces().find(candidate => candidate.active);
-    const folder = space?.machine == null ? space?.folder : null;
-    const key = folder ? JSON.stringify([space.id, folder]) : null;
+    const folder = space?.folder;
+    const machine = space?.machine ?? null;
+    const key = folder ? JSON.stringify([machine, space.id, folder]) : null;
     if (this.rootKey === key) return;
 
     this.rootKey = key;
@@ -57,8 +59,10 @@ export default class SwiftTree extends View {
     this.selected = null;
     if (!folder) return;
 
-    const name = folder.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || folder;
+    const pathSeparator = machine ? /\// : /[\\/]/;
+    const name = folder.split(pathSeparator).filter(Boolean).at(-1) || folder;
     this.root = makeEntry(folder, name, true);
+    this.root.machine = machine;
     this.loadFolder(this.root, cx);
   }
 
@@ -67,14 +71,17 @@ export default class SwiftTree extends View {
     const request = { status: "loading" };
     folder.listing = request;
     cx.spawn(async cx => {
-      const result = await readWindowsDirectory(exec, folder.path);
+      const result = root.machine
+        ? await readLinuxDirectory(exec, appHome(), folder.path, root.machine)
+        : await readWindowsDirectory(exec, folder.path);
       if (this.root !== root || folder.listing !== request) return;
 
-      const prefix = folder.path.replace(/[\\/]+$/, "");
+      const prefix = root.machine ? folder.path.replace(/\/+$/, "") : folder.path.replace(/[\\/]+$/, "");
+      const separator = root.machine ? "/" : "\\";
       folder.listing = result.status === "ready" ? {
         status: "ready",
         entries: result.entries.map(({ name, directory }) =>
-          makeEntry(`${prefix}\\${name}`, name, directory, folder)),
+          makeEntry(`${prefix}${separator}${name}`, name, directory, folder)),
       } : result;
       cx.notify();
     });
@@ -131,7 +138,7 @@ export default class SwiftTree extends View {
     const root = this.root;
     const rows = [];
     if (root) appendRows(rows, root, 0);
-    else rows.push({ key: "no-root", depth: 0, label: "No local folder" });
+    else rows.push({ key: "no-root", depth: 0, label: "No folder" });
     const entriesByKey = new Map(rows.filter(row => row.entry).map(row => [row.key, row.entry]));
 
     const list = v_virtual_list("swifttree-rows", rows.length, 28,

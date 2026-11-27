@@ -72,3 +72,13 @@ Herdr App 0.1.18의 격리된 레이아웃에서 `scripts/install-swifttree.ps1`
 uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --with winrt-Windows.Graphics.Imaging --with winrt-Windows.Storage --with winrt-Windows.Storage.Streams python tests/assert_herdr_panel.py <capture.png> SwiftTree Folder02 alpha.txt --crop 1130 50 455 620
 node --test tests/windows-directory.test.mjs
 ```
+
+## SwiftTree의 SSH Linux 탐색 검증
+
+같은 Windows Herdr 창에 NTFS space와 연결된 Linux SSH space를 준비한다. 두 탐색 루트의 마지막 이름은 같게 만들고 서로 다른 파일을 둔다. Linux에는 숫자 순서가 다른 폴더와 파일, 각각 고유한 자식이 있는 폴더를 두 개 이상 만든다.
+
+1. SSH space에서 Files를 열고 Linux에 직접 접속해 읽은 기준 목록과 화면의 이름·종류·순서를 비교한다. 폴더를 펼쳐 원격에서만 존재하는 자식을 선택한 뒤 화면을 캡처한다.
+2. 테스트 게스트의 네트워크에 지연을 준다. 원격 폴더 두 개를 연속으로 펼치고 로딩 표시가 남아 있는 동안 NTFS space로 전환한다. 원격 응답이 도착한 뒤에도 로컬 전용 파일이 보이는지 확인하고 화면을 캡처한다. 지연을 적용하기 전 설정은 검증 뒤 복구한다.
+3. 원격 트리에서 이미 표시된 하위 폴더의 상위 디렉터리에서 검색 권한을 제거한다. 하위 폴더를 펼쳐 `Access denied`를 확인한다. 이미 표시된 다른 폴더를 삭제한 후 펼치면 `Folder no longer exists`가 표시되어야 한다.
+
+로컬 캡처에서 원격 파일이 섞이지 않았는지 검사할 때 `tests/assert_herdr_panel.py`의 `--exclude <파일명>`을 사용한다. `node --test tests/linux-directory.test.mjs`는 원격으로 전달할 머신과 경로, Linux 목록 디코딩, Windows 정렬 및 불완전한 응답 처리를 검사한다.

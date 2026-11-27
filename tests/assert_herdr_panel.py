@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 from pathlib import Path
+import sys
 from tempfile import TemporaryDirectory
 
 from PIL import Image
@@ -34,16 +35,22 @@ async def recognize_panel(frame: Path, crop: list[int]) -> str:
 
 
 def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("frame", type=Path)
     parser.add_argument("labels", nargs="+")
     parser.add_argument("--crop", type=int, nargs=4, required=True)
+    parser.add_argument("--exclude", action="append", default=[])
     args = parser.parse_args()
 
     text = asyncio.run(recognize_panel(args.frame, args.crop))
     print(text)
     cursor = 0
     normalized = text.casefold()
+    for label in args.exclude:
+        if label.casefold() in normalized:
+            parser.exit(1, f"Unexpected panel label: {label}\n")
     for label in args.labels:
         match = normalized.find(label.casefold(), cursor)
         if match < 0:
