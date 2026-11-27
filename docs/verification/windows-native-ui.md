@@ -90,3 +90,13 @@ node --test tests/windows-directory.test.mjs
 1. 로컬 패널에서 **Open folder**를 눌러 Windows 폴더 선택 창으로 표시할 합성 폴더를 고른다. SSH 패널에서는 연결된 머신의 절대 경로를 입력해 **Open**을 누른다. 두 루트에 한쪽에서만 보이는 파일을 두고 화면에서 구별한다.
 2. 다른 space로 이동했다 돌아오고 각 탐색 루트를 확인한다. 격리된 Windows Herdr 창을 닫고 앱 프로세스가 종료됐는지 확인한 뒤 같은 프로필로 다시 실행한다. 로컬과 SSH 패널을 각각 열어 저장한 루트가 복원되는지 확인하고 캡처한다.
 3. 두 space에서 다시 **+ → Terminal**을 실행한다. 터미널 프롬프트와 `hc get <terminal> --json`의 `cwd`를 기록하고 이전 시작 경로와 비교한다. `herdr-app ls`에서도 두 space의 지정 폴더가 여전히 비어 있는지 확인한다.
+
+## 읽기 전용 미리보기 검증
+
+NTFS와 SSH마다 내용이 다른 파일 A·B와 스크롤할 수 있는 합성 트리를 준비한다. 파일 본문 접근을 관측하면서 폴더를 펼치고 마지막 자식까지 스크롤한다. 이 구간의 데이터 열기·읽기 이벤트 수를 기록한다. 목록·디렉터리 메타데이터 조회는 본문 읽기에서 제외한다.
+
+1. 실제 Windows Herdr의 트리에 A와 B가 보이는 상태에서 A 읽기만 잠시 지연시킨다. A를 열고 로딩이 표시되는 동안 바로 옆 B를 연다.
+2. B의 행 선택과 본문을 같은 프레임에서 확인한다. A가 풀리고 읽기가 끝난 뒤에도 B의 이름·본문이 유지되는지 확인한다. 미리보기에서 수정 입력이 적용되지 않는지 확인한다.
+3. NTFS에서는 합성 파일의 oplock 알림으로 데이터 열기를 관측하고, Linux에서는 합성 폴더의 inotify 파일 접근과 A의 파일 lease를 기록한다. A와 B를 열었을 때 감지가 작동하는지 양성 대조로 확인한다. Windows와 Linux의 원시 시각은 각각의 시간축에서 비교한다. [Windows oplock 중단](https://learn.microsoft.com/en-us/windows-hardware/drivers/ifs/breaking-oplocks) · [Linux 파일 lease](https://www.man7.org/linux/man-pages/man2/F_SETLEASE.2const.html)
+
+패널에서 본문 글자가 작아 OCR이 어긋나면 본문을 좁게 잘라 `--scale 3`으로 검사한다. 파일 선택과 읽기 전용 표시가 함께 보이는 화면은 별도로 직접 연다.

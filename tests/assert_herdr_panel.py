@@ -12,7 +12,7 @@ from winrt.windows.media.ocr import OcrEngine
 from winrt.windows.storage import StorageFile
 
 
-async def recognize_panel(frame: Path, crop: list[int]) -> str:
+async def recognize_panel(frame: Path, crop: list[int], scale: int) -> str:
     x, y, width, height = crop
     with TemporaryDirectory() as temp:
         panel = Path(temp) / "panel.png"
@@ -21,7 +21,10 @@ async def recognize_panel(frame: Path, crop: list[int]) -> str:
                 raise ValueError("invalid panel crop")
             if x + width > bitmap.width or y + height > bitmap.height:
                 raise ValueError("panel crop extends outside the captured window")
-            bitmap.crop((x, y, x + width, y + height)).save(panel)
+            region = bitmap.crop((x, y, x + width, y + height))
+            if scale != 1:
+                region = region.resize((width * scale, height * scale), Image.Resampling.LANCZOS)
+            region.save(panel)
 
         engine = OcrEngine.try_create_from_user_profile_languages()
         if engine is None:
@@ -41,10 +44,11 @@ def main() -> None:
     parser.add_argument("frame", type=Path)
     parser.add_argument("labels", nargs="+")
     parser.add_argument("--crop", type=int, nargs=4, required=True)
+    parser.add_argument("--scale", type=int, choices=(1, 2, 3), default=1)
     parser.add_argument("--exclude", action="append", default=[])
     args = parser.parse_args()
 
-    text = asyncio.run(recognize_panel(args.frame, args.crop))
+    text = asyncio.run(recognize_panel(args.frame, args.crop, args.scale))
     print(text)
     cursor = 0
     normalized = text.casefold()

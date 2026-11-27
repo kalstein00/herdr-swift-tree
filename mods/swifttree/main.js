@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
-import { Button, h_flex, Input, InputState, Scrollbar, v_flex, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
-import { appHome, checking, exec, nextCommand, pickFolder, spaces, theme } from "herdr";
+import { Button, Editor, EditorState, h_flex, Input, InputState, Scrollbar, v_flex, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
+import { appHome, checking, exec, nextCommand, pickFolder, readTextFile, spaces, theme } from "herdr";
 import { readLinuxDirectory } from "./linux-directory.js";
 import { readWindowsDirectory } from "./windows-directory.js";
 
@@ -50,6 +50,8 @@ export default class SwiftTree extends View {
     this.rootKey = null;
     this.root = null;
     this.selected = null;
+    this.preview = null;
+    this.previewEditor = null;
     if (!checking()) {
       this.pathInput = InputState.new({ placeholder: "/path/to/folder" });
       this.pathInput.on("submit", (_event, cx) => this.submitRemotePath(this.scope, cx));
@@ -85,6 +87,7 @@ export default class SwiftTree extends View {
     this.rootKey = key;
     this.root = null;
     this.selected = null;
+    this.preview = null;
     if (!folder) return;
 
     const pathSeparator = machine ? /\// : /[\\/]/;
@@ -193,6 +196,31 @@ export default class SwiftTree extends View {
     else folder.listing = null;
   }
 
+  openFile(entry, rows, cx) {
+    if (!this.preview) {
+      const index = rows.findIndex(row => row.entry === entry);
+      if (index >= 0) this.scroll.scroll_to_item(index, "center");
+    }
+    const root = this.root;
+    const request = { name: entry.name, status: "Loading preview…" };
+    this.preview = request;
+    this.previewEditor ??= EditorState.new({ readonly: true, line_numbers: false, folding: false, soft_wrap: true });
+    cx.spawn(async cx => {
+      const content = await readTextFile(entry.path, { on: root.machine }).catch(() => null);
+      if (this.root !== root || this.preview !== request) return;
+      if (content == null || content.includes("\0")) {
+        request.status = "Preview unavailable";
+      } else if (content === "") {
+        request.status = "Empty file";
+      } else {
+        this.previewEditor.set_value(content);
+        this.previewEditor.set_selected_range({ start: 0, end: 0 });
+        request.status = null;
+      }
+      cx.notify();
+    });
+  }
+
   handleKey(key, rows, cx) {
     const index = rows.findIndex(row => row.entry === this.selected);
     const entry = this.selected;
@@ -208,6 +236,8 @@ export default class SwiftTree extends View {
       }
     } else if ((key === "right" || key === "enter") && entry?.directory && !entry.open) {
       this.toggle(entry, cx);
+    } else if (key === "enter" && entry && !entry.directory) {
+      this.openFile(entry, rows, cx);
     } else if (key === "left" && entry?.directory && entry.open) {
       this.toggle(entry, cx);
     } else if (key === "left" && entry?.parent && entry.parent !== this.root) {
@@ -260,6 +290,18 @@ export default class SwiftTree extends View {
     return box;
   }
 
+  renderPreview(colors) {
+    const preview = this.preview;
+    const content = preview.status
+      ? div().p(10).text_color(colors.muted).child(preview.status)
+      : Editor.new(this.previewEditor).flex_1().min_h(0).w_full();
+    return v_flex().flex_1().min_h(0).w_full().border_t(1).border_color(colors.border)
+      .child(h_flex().h(32).flex_none().px(10).gap(8).items_center().border_b(1).border_color(colors.border)
+        .child(div().flex_1().min_w(0).truncate().font_medium().text_color(colors.foreground).child(preview.name))
+        .child(div().flex_none().text_color(colors.muted).child("Read-only")))
+      .child(content);
+  }
+
   render(cx) {
     this.syncRoot(cx);
     const colors = theme();
@@ -279,6 +321,7 @@ export default class SwiftTree extends View {
         this.focus.focus();
         this.selected = entry;
         if (entry.directory) this.toggle(entry, cx);
+        else this.openFile(entry, rows, cx);
         cx.notify();
       });
 
@@ -292,6 +335,7 @@ export default class SwiftTree extends View {
         .child(div().flex_1().min_w(0).truncate().text_right().text_color(colors.muted).child(this.root?.name ?? "")))
       .child(root ? v_flex().relative().flex_1().min_h(0).p(6)
         .child(list)
-        .child(Scrollbar.vertical("swifttree-rows").absolute().inset_0()) : this.renderChooser(this.scope, colors));
+        .child(Scrollbar.vertical("swifttree-rows").absolute().inset_0()) : this.renderChooser(this.scope, colors))
+      .when(this.preview != null, panel => panel.child(this.renderPreview(colors)));
   }
 }
