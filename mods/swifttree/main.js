@@ -3,7 +3,7 @@ import { Button, Editor, EditorState, h_flex, Input, InputState, Scrollbar, v_fl
 import { appHome, checking, exec, nextCommand, pickFolder, readTextFile, spaces, theme } from "herdr";
 import { createDirectoryAccess } from "./directory-access.js";
 import { readLinuxDirectory } from "./linux-directory.js";
-import { readLinuxWatch, reconcileLinuxWatch } from "./linux-watch.js";
+import { readLinuxMachineState, readLinuxWatch, reconcileLinuxWatch } from "./linux-watch.js";
 import { ancestorDirectoryIds, isOpenTreeFolder, makeEntry, openedTreeFolders, releaseEntry, retainEntry, setFolderListing, setFolderOpen } from "./tree-folders.js";
 import { treeRows } from "./tree-rows.js";
 import { readWindowsDirectory } from "./windows-directory.js";
@@ -12,12 +12,14 @@ import { connectWindowsWatcher, readWindowsWatch } from "./windows-watch-connect
 
 const messages = {
   loading: "Loading folder…",
+  waiting: "연결 후 불러올 수 있음",
   denied: "Access denied",
   missing: "Folder no longer exists",
   failed: "Could not read folder",
   empty: "Empty folder",
   cycle: "순환 링크",
 };
+const rowHeight = 28;
 
 function activeSpace() {
   return spaces().find(space => space.active);
@@ -43,7 +45,10 @@ export default class SwiftTree extends View {
     this.root = null;
     this.selected = null;
     this.scrollEntry = null;
+    this.recoveryAnchors = null;
     this.preview = null;
+    this.lastPreview = null;
+    this.previewRequest = null;
     this.previewEditor = null;
     if (!checking()) {
       this.directoryAccess = createDirectoryAccess(cx);
@@ -83,15 +88,22 @@ export default class SwiftTree extends View {
     this.root = null;
     this.selected = null;
     this.scrollEntry = null;
+    this.recoveryAnchors = null;
     this.preview = null;
+    this.lastPreview = null;
+    this.previewRequest = null;
     if (!folder) return;
 
     const pathSeparator = machine ? /\// : /[\\/]/;
     const name = folder.split(pathSeparator).filter(Boolean).at(-1) || folder;
     this.root = makeEntry(folder, name, true);
     this.root.machine = machine;
-    if (machine) this.startLinuxWatch(this.root, cx);
-    else this.syncWindowsWatches(this.root, cx);
+    if (machine) {
+      this.root.remote = { offline: false, revision: 0, probe: null, folded: new Set() };
+      this.startLinuxWatch(this.root, cx);
+    } else {
+      this.syncWindowsWatches(this.root, cx);
+    }
     const initialListing = this.scope.initialListing;
     this.scope.initialListing = null;
     if (initialListing && folder === this.scope.folder) {
@@ -104,6 +116,12 @@ export default class SwiftTree extends View {
 
   loadFolder(folder, cx, reason = "open") {
     const root = this.root;
+    const remote = root.remote;
+    if (remote?.offline && reason === "open") {
+      folder.listing ??= { status: "waiting" };
+      return Promise.resolve(null);
+    }
+    const revision = remote?.revision;
     const request = {};
     const ancestors = ancestorDirectoryIds(folder);
     const watch = this.windowsWatches.get(folder);
@@ -113,14 +131,22 @@ export default class SwiftTree extends View {
     }
     folder.request = request;
     folder.listing ??= { status: "loading" };
+    const current = () => this.root === root && folder.request === request && isOpenTreeFolder(folder, root);
     return new Promise(resolve => {
       cx.spawn(async cx => {
         const result = await readDirectory(root.machine, folder.path, reason, this.directoryAccess, ancestors);
-        if (this.root !== root || folder.request !== request || !isOpenTreeFolder(folder, root)) {
+        if (current() && remote && result.status === "failed") {
+          await this.checkRemoteConnection(root, cx, reason === "recovery");
+        }
+        if (!current()) {
           resolve(null);
           return;
         }
         folder.request = null;
+        if (revision !== remote?.revision) {
+          resolve(false);
+          return;
+        }
         if (ancestorDirectoryIds(folder) !== ancestors) {
           this.loadFolder(folder, cx, reason).then(resolve);
           return;
@@ -133,6 +159,7 @@ export default class SwiftTree extends View {
           resolve(false);
           return;
         }
+        if (reason === "recovery" && remote) this.rememberRecoveryAnchor(root);
         const previous = folder.listing;
         setFolderListing(folder, result, root.machine ? "/" : "\\");
         if (!root.machine && this.windowsWatchScopeChanged(folder, previous)) this.syncWindowsWatches(root, cx);
@@ -242,33 +269,119 @@ export default class SwiftTree extends View {
 
   startLinuxWatch(root, cx) {
     const current = () => this.root === root;
+    const remote = root.remote;
     cx.spawn(async cx => {
       const previous = new Map();
+      let revision = remote.revision;
       while (current()) {
         try {
+          if (revision !== remote.revision) {
+            previous.clear();
+            revision = remote.revision;
+          }
           const result = await readLinuxWatch(exec, root.machine, openedTreeFolders(root), previous, current);
           if (!current() || !result) return;
+          if (revision !== remote.revision) continue;
           const { fingerprints, longPoll } = result;
           const failed = await reconcileLinuxWatch(fingerprints, previous, (folder, registered) => {
-            if (!current() || !isOpenTreeFolder(folder, root)) return null;
-            const reason = root.watchUnavailable ? "recovery" : registered ? "change" : "watch-start";
+            if (!current() || revision !== remote.revision || !isOpenTreeFolder(folder, root)) return null;
+            const reason = remote.offline || root.watchUnavailable ? "recovery" : registered ? "change" : "watch-start";
             return this.loadFolder(folder, cx, reason);
           });
           if (!current()) return;
+          if (revision !== remote.revision) continue;
           const open = new Set(openedTreeFolders(root));
           for (const folder of previous.keys()) {
             if (!open.has(folder)) previous.delete(folder);
+          }
+          if (remote.offline && !failed && [...open].every(folder => previous.has(folder))) {
+            this.finishRemoteRecovery(root, cx);
           }
           this.setWatchUnavailable(root, failed, cx);
           if (failed || !longPoll) await new Promise(resolve => cx.timer.after(failed ? 250 : 100, resolve));
         } catch {
           if (!current()) return;
           previous.clear();
+          const state = await this.checkRemoteConnection(root, cx);
+          if (!current()) return;
           this.setWatchUnavailable(root, true, cx);
+          if (remote.offline && state === "connected") await this.recoverWithoutRemoteWatch(root, cx);
           await new Promise(resolve => cx.timer.after(1500, resolve));
         }
       }
     });
+  }
+
+  async checkRemoteConnection(root, cx, recovering = false) {
+    const remote = root.remote;
+    const revision = remote.revision;
+    remote.probe ??= readLinuxMachineState(exec, root.machine).finally(() => { remote.probe = null; });
+    const state = await remote.probe;
+    if (state !== "offline" || this.root !== root || remote.revision !== revision) return state;
+    if (remote.offline && !recovering) return state;
+    remote.revision++;
+    if (remote.offline) return state;
+    remote.offline = true;
+    for (const folder of openedTreeFolders(root)) {
+      if (!folder.listing || folder.listing.status === "loading" || folder.listing.status === "failed") {
+        folder.listing = { status: "waiting" };
+      }
+    }
+    if (this.previewRequest) {
+      this.preview = this.lastPreview ?? { name: this.previewRequest.name, status: messages.waiting };
+      this.previewRequest = null;
+    }
+    cx.notify();
+    return state;
+  }
+
+  async recoverWithoutRemoteWatch(root, cx) {
+    const revision = root.remote.revision;
+    const current = () => this.root === root && revision === root.remote.revision;
+    const refreshed = new Set();
+    for (const folder of openedTreeFolders(root)) {
+      if (!current()) return;
+      if (!isOpenTreeFolder(folder, root)) continue;
+      const applied = await this.loadFolder(folder, cx, "recovery");
+      if (applied === false) return;
+      if (applied === true) refreshed.add(folder);
+    }
+    if (current() && openedTreeFolders(root).every(folder => refreshed.has(folder))) {
+      this.finishRemoteRecovery(root, cx);
+    }
+  }
+
+  finishRemoteRecovery(root, cx) {
+    root.remote.offline = false;
+    const folded = [...root.remote.folded];
+    root.remote.folded.clear();
+    for (const folder of folded) {
+      folder.listing = null;
+      this.releaseTreeEntry(folder);
+    }
+    cx.notify();
+  }
+
+  rememberRecoveryAnchor(root) {
+    if (this.recoveryAnchors || this.scrollEntry) return;
+    const rows = treeRows(root);
+    const offset = this.scroll.offset().y;
+    const height = this.scroll.viewport_size().height;
+    if (!height) return;
+    const first = Math.floor(offset / rowHeight);
+    const last = Math.min(rows.length - 1, Math.ceil((offset + height) / rowHeight) - 1);
+    const center = Math.min(last, Math.floor((offset + height / 2) / rowHeight));
+    const selected = rows.indexOf(this.selected);
+    const entries = new Map();
+    if (selected >= first && selected <= last) entries.set(this.selected, selected);
+    const indices = [];
+    for (let index = first; index <= last; index++) indices.push(index);
+    indices.sort((a, b) => Math.abs(a - center) - Math.abs(b - center));
+    for (const index of indices) {
+      const entry = rows.rowAt(index)?.entry;
+      if (entry) entries.set(retainEntry(entry), index);
+    }
+    this.recoveryAnchors = { entries, center };
   }
 
   setWatchUnavailable(root, unavailable, cx) {
@@ -343,35 +456,57 @@ export default class SwiftTree extends View {
   }
 
   toggle(folder, cx) {
-    setFolderOpen(folder, !folder.open);
+    const remote = this.root.remote;
+    setFolderOpen(folder, !folder.open, remote?.offline);
+    if (remote?.offline) {
+      if (folder.open) remote.folded.delete(folder);
+      else if (folder.listing) remote.folded.add(folder);
+    }
     if (folder.open) this.loadFolder(folder, cx);
     else if (!this.root.machine) this.syncWindowsWatches(this.root, cx);
   }
 
   selectEntry(entry) {
     if (entry === this.selected) return;
-    releaseEntry(this.selected);
+    const previous = this.selected;
     this.selected = retainEntry(entry);
+    this.releaseTreeEntry(previous);
     this.scrollEntry = null;
+  }
+
+  releaseTreeEntry(entry) {
+    if (entry === this.selected || this.recoveryAnchors?.entries.has(entry) || this.root.remote?.folded.has(entry)) return;
+    releaseEntry(entry);
   }
 
   openFile(entry, cx) {
     if (!this.preview) this.scrollEntry = entry;
     const root = this.root;
+    if (root.remote?.offline) {
+      this.preview ??= { name: entry.name, status: messages.waiting };
+      return;
+    }
     const request = { name: entry.name, status: "Loading preview…" };
     this.preview = request;
+    this.previewRequest = request;
     this.previewEditor ??= EditorState.new({ readonly: true, line_numbers: false, folding: false, soft_wrap: true });
     cx.spawn(async cx => {
       const content = await readTextFile(entry.path, { on: root.machine }).catch(() => null);
-      if (this.root !== root || this.preview !== request) return;
+      const current = () => this.root === root && this.previewRequest === request;
+      if (current() && root.remote && content == null) await this.checkRemoteConnection(root, cx);
+      if (!current()) return;
+      this.previewRequest = null;
       if (content == null || content.includes("\0")) {
         request.status = "Preview unavailable";
-      } else if (content === "") {
-        request.status = "Empty file";
       } else {
-        this.previewEditor.set_value(content);
-        this.previewEditor.set_selected_range({ start: 0, end: 0 });
-        request.status = null;
+        this.lastPreview = request;
+        if (content === "") {
+          request.status = "Empty file";
+        } else {
+          this.previewEditor.set_value(content);
+          this.previewEditor.set_selected_range({ start: 0, end: 0 });
+          request.status = null;
+        }
       }
       cx.notify();
     });
@@ -419,7 +554,7 @@ export default class SwiftTree extends View {
     const selected = entry != null && this.selected === entry;
     const glyph = entry?.directory ? (entry.open ? "▾" : "▸") : "";
     return h_flex()
-      .h(28).w_full().pl(8 + row.depth * 18).pr(8).gap(6).items_center().rounded(5)
+      .h(rowHeight).w_full().pl(8 + row.depth * 18).pr(8).gap(6).items_center().rounded(5)
       .when(selected, element => element.bg(colors.selection))
       .when(entry != null, element => element.cursor_pointer().hover(style => style.bg(colors.hover)))
       .child(div().w(13).flex_none().text_color(colors.muted).child(glyph))
@@ -474,12 +609,26 @@ export default class SwiftTree extends View {
     const rows = treeRows(root);
     // The native list consumes a position during layout. Resolve selection
     // against the same row projection that is passed to that layout.
-    const scrollIndex = rows.indexOf(this.scrollEntry);
+    let scrollIndex = rows.indexOf(this.scrollEntry);
     this.scrollEntry = null;
+    if (this.recoveryAnchors) {
+      const { entries, center } = this.recoveryAnchors;
+      this.recoveryAnchors = null;
+      // Center the row at the same distance from the surviving viewport anchor.
+      if (scrollIndex < 0) {
+        for (const [entry, index] of entries) {
+          const updated = rows.indexOf(entry);
+          if (updated < 0) continue;
+          if (updated !== index) scrollIndex = Math.max(0, Math.min(rows.length - 1, updated + center - index));
+          break;
+        }
+      }
+      for (const entry of entries.keys()) this.releaseTreeEntry(entry);
+    }
     if (scrollIndex >= 0) this.scroll.scroll_to_item(scrollIndex, "center");
     const visibleRows = new Map();
 
-    const list = v_virtual_list("swifttree-rows", rows.length, 28,
+    const list = v_virtual_list("swifttree-rows", rows.length, rowHeight,
       index => rows.rowAt(index).key,
       range => {
         visibleRows.clear();
@@ -511,7 +660,8 @@ export default class SwiftTree extends View {
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(colors.border)
         .child(div().font_semibold().text_color(colors.foreground).child("SwiftTree"))
         .child(div().flex_1().min_w(0).truncate().text_right().text_color(colors.muted).child(this.root?.name ?? "")))
-      .when(root?.watchUnavailable, panel => panel.child(div().px(14).py(5).text_color(colors.muted).child("Live updates unavailable")))
+      .when(root?.remote?.offline || root?.watchUnavailable, panel => panel.child(div().px(14).py(5)
+        .text_color(colors.muted).child(root.remote?.offline ? "연결 끊김 · 마지막으로 확인한 내용" : "Live updates unavailable")))
       .child(root ? v_flex().relative().flex_1().min_h(0).p(6)
         .child(list)
         .child(Scrollbar.vertical("swifttree-rows").absolute().inset_0()) : this.renderChooser(this.scope, colors))

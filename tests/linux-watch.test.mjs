@@ -1,6 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readLinuxWatch, reconcileLinuxWatch } from "../mods/swifttree/linux-watch.js";
+import { readLinuxMachineState, readLinuxWatch, reconcileLinuxWatch } from "../mods/swifttree/linux-watch.js";
+
+test("distinguishes the watched machine's transport state from a watch or discovery failure", async () => {
+  const result = state => async (command, args, options) => {
+    assert.equal(command, "hc");
+    assert.deepEqual(args, ["machine", "ls", "--json"]);
+    assert.deepEqual(options, { timeout: 3000 });
+    return { code: 0, stdout: JSON.stringify({ machines: [
+      { name: "other", state: "unreachable" },
+      { name: "target", state },
+    ] }) };
+  };
+  assert.equal(await readLinuxMachineState(result("connected"), "target"), "connected");
+  assert.equal(await readLinuxMachineState(result("connecting"), "target"), "offline");
+  assert.equal(await readLinuxMachineState(result("unreachable"), "target"), "offline");
+  assert.equal(await readLinuxMachineState(result("connected"), "absent"), null);
+  assert.equal(await readLinuxMachineState(async () => ({ code: 0, stdout: "?" }), "target"), null);
+});
 
 test("samples literal remote folder paths and carries each fingerprint across requests", async () => {
   const root = { path: "/workspace" };

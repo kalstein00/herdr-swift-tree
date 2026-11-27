@@ -63,6 +63,20 @@ export async function readLinuxWatch(exec, machine, folders, previous, current) 
   return { fingerprints, longPoll };
 }
 
+export async function readLinuxMachineState(exec, machine) {
+  try {
+    const { code, stdout } = await exec("hc", ["machine", "ls", "--json"], { timeout: 3000 });
+    if (code !== 0) return null;
+    const { machines } = JSON.parse(stdout);
+    const state = machines.find(row => row.name === machine)?.state;
+    if (state === "connected") return "connected";
+    if (state === "unreachable" || state === "connecting") return "offline";
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function reconcileLinuxWatch(fingerprints, previous, reload) {
   let failed = false;
   for (const [folder, fingerprint] of fingerprints) {

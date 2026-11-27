@@ -56,14 +56,14 @@ export function releaseEntry(entry) {
   if (retained?.get(entry.index) === entry) retained.delete(entry.index);
 }
 
-export function setFolderOpen(folder, open) {
+export function setFolderOpen(folder, open, keepListing = false) {
   folder.open = open;
   if (open) {
     folder.parent.listing.expanded.add(retainEntry(folder));
   } else {
     folder.parent.listing.expanded.delete(folder);
     folder.request = null;
-    folder.listing = null;
+    if (!keepListing) folder.listing = null;
   }
 }
 

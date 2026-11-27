@@ -87,6 +87,23 @@ test("moving selection keeps only the current row and expanded folders alive", (
   assert.equal(treeRows(root).rowAt(0).entry.name, "replacement");
 });
 
+test("a folded offline folder retains its rows without staying in the watch scope", () => {
+  const root = makeEntry("/workspace", "workspace", true);
+  list(root, [directory("folder")]);
+  const folder = treeRows(root).rowAt(0).entry;
+  setFolderOpen(folder, true);
+  list(folder, [file("cached")]);
+
+  setFolderOpen(folder, false, true);
+  assert.deepEqual(openedTreeFolders(root), [root]);
+  assert.equal(treeRows(root).length, 1);
+  setFolderOpen(treeRows(root).rowAt(0).entry, true);
+  assert.equal(treeRows(root).rowAt(1).entry.name, "cached");
+
+  setFolderOpen(folder, false);
+  assert.equal(folder.listing, null);
+});
+
 test("only the current branch contributes ancestors, and retargeting a link retires its previous children", () => {
   const listTarget = (folder, identity, entries) => setFolderListing(folder, { status: "ready", identity, entries }, "/");
   const root = makeEntry("/workspace", "workspace", true);
