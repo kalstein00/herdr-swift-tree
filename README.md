@@ -17,4 +17,6 @@ Windows 11의 네이티브 Herdr App 0.1.18에서 검증했습니다. Herdr를 �
 
 Herdr에 연결한 SSH Linux 머신에서 탐색할 폴더를 지정한 space를 열면 같은 Files 버튼에서 원격 파일을 탐색할 수 있습니다. 연결된 Linux 머신의 `sh`와 GNU `find`로 UTF-8 이름의 목록을 읽습니다. 파일·폴더 이름은 Windows 창에서 로컬과 같은 순서로 정렬됩니다.
 
+폴더가 지정되지 않은 space에서는 SwiftTree의 **Open folder**를 누릅니다. 로컬 space에서는 Windows 폴더 선택 창을 사용하고, SSH space에서는 연결된 머신의 절대 경로를 입력합니다. 선택한 탐색 루트는 해당 space에 저장되며 Herdr를 다시 실행해도 복원됩니다. 새 터미널은 Herdr의 기존 시작 경로를 따릅니다.
+
 기본 Files를 사용하려면 `Ctrl+Shift+P`에서 `layout`을 검색하고 **Layout: Herdr**를 선택합니다. 상단 **Files** 버튼으로 기본 패널을 열 수 있습니다. [Windows 네이티브 UI 검증 절차](docs/verification/windows-native-ui.md)

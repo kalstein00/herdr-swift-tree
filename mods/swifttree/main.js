@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
-import { h_flex, Scrollbar, v_flex, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
-import { appHome, checking, exec, nextCommand, spaces, theme } from "herdr";
+import { Button, h_flex, Input, InputState, Scrollbar, v_flex, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
+import { appHome, checking, exec, nextCommand, pickFolder, spaces, theme } from "herdr";
 import { readLinuxDirectory } from "./linux-directory.js";
 import { readWindowsDirectory } from "./windows-directory.js";
 
@@ -14,6 +14,18 @@ const messages = {
 
 function makeEntry(path, name, directory, parent = null) {
   return { path, name, directory, parent, open: false, listing: null };
+}
+
+function activeSpace() {
+  return spaces().find(space => space.active);
+}
+
+function choiceKey(space) {
+  return space ? JSON.stringify(["swifttree-root", space.machine ?? null, space.id]) : null;
+}
+
+function readDirectory(machine, folder) {
+  return machine ? readLinuxDirectory(exec, appHome(), folder, machine) : readWindowsDirectory(exec, folder);
 }
 
 function appendRows(rows, folder, depth) {
@@ -34,10 +46,13 @@ export default class SwiftTree extends View {
   init(_props, cx) {
     this.focus = cx.focus_handle();
     this.scroll = VirtualListScrollHandle.new();
+    this.scope = null;
     this.rootKey = null;
     this.root = null;
     this.selected = null;
     if (!checking()) {
+      this.pathInput = InputState.new({ placeholder: "/path/to/folder" });
+      this.pathInput.on("submit", (_event, cx) => this.submitRemotePath(this.scope, cx));
       cx.spawn(async () => {
         for (;;) {
           if (await nextCommand() === "focus") this.focus.focus();
@@ -48,10 +63,23 @@ export default class SwiftTree extends View {
 
   syncRoot(cx) {
     if (checking()) return;
-    const space = spaces().find(candidate => candidate.active);
-    const folder = space?.folder;
+    const space = activeSpace();
     const machine = space?.machine ?? null;
-    const key = folder ? JSON.stringify([machine, space.id, folder]) : null;
+    const storageKey = choiceKey(space);
+    if (storageKey !== (this.scope?.storageKey ?? null)) {
+      this.scope = storageKey ? {
+        storageKey,
+        machine,
+        folder: localStorage.getItem(storageKey),
+        initialListing: null,
+        formOpen: false,
+        busy: false,
+        error: "",
+      } : null;
+    }
+
+    const folder = space?.folder || this.scope?.folder;
+    const key = folder ? JSON.stringify([storageKey, folder]) : null;
     if (this.rootKey === key) return;
 
     this.rootKey = key;
@@ -63,7 +91,23 @@ export default class SwiftTree extends View {
     const name = folder.split(pathSeparator).filter(Boolean).at(-1) || folder;
     this.root = makeEntry(folder, name, true);
     this.root.machine = machine;
-    this.loadFolder(this.root, cx);
+    const initialListing = this.scope.initialListing;
+    this.scope.initialListing = null;
+    if (initialListing && folder === this.scope.folder) {
+      this.applyListing(this.root, initialListing, machine);
+    } else {
+      this.loadFolder(this.root, cx);
+    }
+  }
+
+  applyListing(folder, result, machine) {
+    const prefix = machine ? folder.path.replace(/\/+$/, "") : folder.path.replace(/[\\/]+$/, "");
+    const separator = machine ? "/" : "\\";
+    folder.listing = result.status === "ready" ? {
+      status: "ready",
+      entries: result.entries.map(({ name, directory }) =>
+        makeEntry(`${prefix}${separator}${name}`, name, directory, folder)),
+    } : result;
   }
 
   loadFolder(folder, cx) {
@@ -71,19 +115,75 @@ export default class SwiftTree extends View {
     const request = { status: "loading" };
     folder.listing = request;
     cx.spawn(async cx => {
-      const result = root.machine
-        ? await readLinuxDirectory(exec, appHome(), folder.path, root.machine)
-        : await readWindowsDirectory(exec, folder.path);
+      const result = await readDirectory(root.machine, folder.path);
       if (this.root !== root || folder.listing !== request) return;
-
-      const prefix = root.machine ? folder.path.replace(/\/+$/, "") : folder.path.replace(/[\\/]+$/, "");
-      const separator = root.machine ? "/" : "\\";
-      folder.listing = result.status === "ready" ? {
-        status: "ready",
-        entries: result.entries.map(({ name, directory }) =>
-          makeEntry(`${prefix}${separator}${name}`, name, directory, folder)),
-      } : result;
+      this.applyListing(folder, result, root.machine);
       cx.notify();
+    });
+  }
+
+  canChoose(scope) {
+    if (!scope || this.scope !== scope || scope.folder) return false;
+    const space = activeSpace();
+    return choiceKey(space) === scope.storageKey && !space.folder;
+  }
+
+  openFolder(scope, cx) {
+    if (!this.canChoose(scope) || scope.busy) return;
+    if (!scope.machine) {
+      this.chooseFolder(scope, null, cx);
+      return;
+    }
+    scope.formOpen = true;
+    scope.error = "";
+    this.pathInput.set_value("");
+    this.pathInput.focus();
+    cx.notify();
+  }
+
+  submitRemotePath(scope, cx) {
+    if (!this.canChoose(scope) || !scope.formOpen || scope.busy) return;
+    const path = this.pathInput.value();
+    if (!path.startsWith("/")) {
+      scope.error = "Enter an absolute Linux folder path.";
+      cx.notify();
+      return;
+    }
+    this.chooseFolder(scope, path, cx);
+  }
+
+  chooseFolder(scope, remotePath, cx) {
+    scope.busy = true;
+    scope.error = "";
+    cx.notify();
+    cx.spawn(async cx => {
+      try {
+        const folder = remotePath ?? await pickFolder({ prompt: "Open folder" });
+        if (!folder || !this.canChoose(scope)) return;
+
+        const listing = await readDirectory(scope.machine, folder);
+        if (!this.canChoose(scope)) return;
+        if (listing.status !== "ready") {
+          scope.error = messages[listing.status];
+          return;
+        }
+
+        try {
+          localStorage.setItem(scope.storageKey, folder);
+          await localStorage.flush();
+        } catch {
+          if (localStorage.getItem(scope.storageKey) === folder) localStorage.removeItem(scope.storageKey);
+          scope.error = "Could not save folder";
+          return;
+        }
+        scope.folder = folder;
+        scope.initialListing = listing;
+      } catch {
+        scope.error = "Could not open folder";
+      } finally {
+        scope.busy = false;
+        if (this.scope === scope) cx.notify();
+      }
     });
   }
 
@@ -132,13 +232,40 @@ export default class SwiftTree extends View {
         .text_color(entry ? colors.foreground : colors.muted).child(entry?.name ?? row.label));
   }
 
+  renderChooser(scope, colors) {
+    const box = v_flex().p(14).gap(8);
+    if (!scope) return box;
+    const button = (id, label, action) => Button.new(id).h(30).px(10).rounded(6)
+      .border_1().border_color(colors.border).text_color(colors.foreground)
+      .disabled(scope.busy).hover(style => style.bg(colors.hover)).on_click(action).child(label);
+    if (scope.formOpen) {
+      box.child(div().text_color(colors.muted).truncate().child(`Folder path on ${scope.machine}`))
+        .child(Input.new(this.pathInput).h(34).w_full().px(9).rounded(6)
+          .border_1().border_color(colors.input).text_color(colors.foreground))
+        .child(h_flex().gap(8)
+          .child(button("choose-remote-folder", "Open", (_event, cx) => this.submitRemotePath(scope, cx)))
+          .child(button("cancel-remote-folder", "Cancel", (_event, cx) => {
+            if (scope.busy || this.scope !== scope) return;
+            scope.formOpen = false;
+            scope.error = "";
+            this.focus.focus();
+            cx.notify();
+          })));
+    } else {
+      box.child(h_flex().child(button("open-folder", "Open folder", (_event, cx) => this.openFolder(scope, cx))));
+    }
+    if (scope.error || scope.busy) {
+      box.child(div().text_color(colors.muted).child(scope.error || "Checking folder…"));
+    }
+    return box;
+  }
+
   render(cx) {
     this.syncRoot(cx);
     const colors = theme();
     const root = this.root;
     const rows = [];
     if (root) appendRows(rows, root, 0);
-    else rows.push({ key: "no-root", depth: 0, label: "No folder" });
     const entriesByKey = new Map(rows.filter(row => row.entry).map(row => [row.key, row.entry]));
 
     const list = v_virtual_list("swifttree-rows", rows.length, 28,
@@ -157,12 +284,14 @@ export default class SwiftTree extends View {
 
     return v_flex().id("swifttree").size_full().min_h(0).rounded(10)
       .overflow_hidden().bg(colors.background).border_1().border_color(colors.border).text_size(13)
-      .track_focus(this.focus).on_key_down((event, cx) => this.handleKey(event.keystroke, rows, cx))
+      .track_focus(this.focus).on_key_down((event, cx) => {
+        if (root) this.handleKey(event.keystroke, rows, cx);
+      })
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(colors.border)
         .child(div().font_semibold().text_color(colors.foreground).child("SwiftTree"))
         .child(div().flex_1().min_w(0).truncate().text_right().text_color(colors.muted).child(this.root?.name ?? "")))
-      .child(v_flex().relative().flex_1().min_h(0).p(6)
+      .child(root ? v_flex().relative().flex_1().min_h(0).p(6)
         .child(list)
-        .child(Scrollbar.vertical("swifttree-rows").absolute().inset_0()));
+        .child(Scrollbar.vertical("swifttree-rows").absolute().inset_0()) : this.renderChooser(this.scope, colors));
   }
 }

@@ -82,3 +82,11 @@ node --test tests/windows-directory.test.mjs
 3. 원격 트리에서 이미 표시된 하위 폴더의 상위 디렉터리에서 검색 권한을 제거한다. 하위 폴더를 펼쳐 `Access denied`를 확인한다. 이미 표시된 다른 폴더를 삭제한 후 펼치면 `Folder no longer exists`가 표시되어야 한다.
 
 로컬 캡처에서 원격 파일이 섞이지 않았는지 검사할 때 `tests/assert_herdr_panel.py`의 `--exclude <파일명>`을 사용한다. `node --test tests/linux-directory.test.mjs`는 원격으로 전달할 머신과 경로, Linux 목록 디코딩, Windows 정렬 및 불완전한 응답 처리를 검사한다.
+
+## 폴더 선택과 재시작 복원 검증
+
+격리된 프로필에서 폴더가 지정되지 않은 로컬 space와 SSH space를 준비한다. 각 space의 Files 패널에 **Open folder**가 표시되는지 확인한다. 상단 **+ → Terminal**로 연 터미널의 실제 시작 경로를 각각 기록한다.
+
+1. 로컬 패널에서 **Open folder**를 눌러 Windows 폴더 선택 창으로 표시할 합성 폴더를 고른다. SSH 패널에서는 연결된 머신의 절대 경로를 입력해 **Open**을 누른다. 두 루트에 한쪽에서만 보이는 파일을 두고 화면에서 구별한다.
+2. 다른 space로 이동했다 돌아오고 각 탐색 루트를 확인한다. 격리된 Windows Herdr 창을 닫고 앱 프로세스가 종료됐는지 확인한 뒤 같은 프로필로 다시 실행한다. 로컬과 SSH 패널을 각각 열어 저장한 루트가 복원되는지 확인하고 캡처한다.
+3. 두 space에서 다시 **+ → Terminal**을 실행한다. 터미널 프롬프트와 `hc get <terminal> --json`의 `cwd`를 기록하고 이전 시작 경로와 비교한다. `herdr-app ls`에서도 두 space의 지정 폴더가 여전히 비어 있는지 확인한다.
