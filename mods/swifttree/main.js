@@ -2,6 +2,8 @@ import { View, div } from "gpui-kit";
 import { Button, Editor, EditorState, h_flex, Input, InputState, Scrollbar, v_flex, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
 import { appHome, checking, exec, nextCommand, pickFolder, readTextFile, spaces, theme } from "herdr";
 import { readLinuxDirectory } from "./linux-directory.js";
+import { readLinuxWatch, reconcileLinuxWatch } from "./linux-watch.js";
+import { isOpenTreeFolder, openedTreeFolders } from "./tree-folders.js";
 import { readWindowsDirectory } from "./windows-directory.js";
 import { affectedWindowsFolders } from "./windows-watch.js";
 import { connectWindowsWatcher, readWindowsWatch } from "./windows-watch-connection.js";
@@ -100,7 +102,8 @@ export default class SwiftTree extends View {
     const name = folder.split(pathSeparator).filter(Boolean).at(-1) || folder;
     this.root = makeEntry(folder, name, true);
     this.root.machine = machine;
-    if (!machine) this.startWindowsWatch(this.root, cx);
+    if (machine) this.startLinuxWatch(this.root, cx);
+    else this.startWindowsWatch(this.root, cx);
     const initialListing = this.scope.initialListing;
     this.scope.initialListing = null;
     if (initialListing && folder === this.scope.folder) {
@@ -134,12 +137,22 @@ export default class SwiftTree extends View {
     const request = {};
     folder.request = request;
     folder.listing ??= { status: "loading" };
-    cx.spawn(async cx => {
-      const result = await readDirectory(root.machine, folder.path, reason);
-      if (this.root !== root || folder.request !== request) return;
-      folder.request = null;
-      this.applyListing(folder, result, root.machine);
-      cx.notify();
+    return new Promise(resolve => {
+      cx.spawn(async cx => {
+        const result = await readDirectory(root.machine, folder.path, reason);
+        if (this.root !== root || folder.request !== request) {
+          resolve(null);
+          return;
+        }
+        folder.request = null;
+        if (root.machine && reason !== "open" && result.status === "failed") {
+          resolve(false);
+          return;
+        }
+        this.applyListing(folder, result, root.machine);
+        resolve(true);
+        cx.notify();
+      });
     });
   }
 
@@ -191,6 +204,43 @@ export default class SwiftTree extends View {
         if (current()) this.startWindowsWatch(root, cx, true);
       });
     });
+  }
+
+  startLinuxWatch(root, cx) {
+    const current = () => this.root === root;
+    cx.spawn(async cx => {
+      const previous = new Map();
+      while (current()) {
+        try {
+          const result = await readLinuxWatch(exec, root.machine, openedTreeFolders(root), previous, current);
+          if (!current() || !result) return;
+          const { fingerprints, longPoll } = result;
+          const failed = await reconcileLinuxWatch(fingerprints, previous, (folder, registered) => {
+            if (!current() || !isOpenTreeFolder(folder, root)) return null;
+            const reason = root.watchUnavailable ? "recovery" : registered ? "change" : "watch-start";
+            return this.loadFolder(folder, cx, reason);
+          });
+          if (!current()) return;
+          const open = new Set(openedTreeFolders(root));
+          for (const folder of previous.keys()) {
+            if (!open.has(folder)) previous.delete(folder);
+          }
+          this.setLinuxWatchUnavailable(root, failed, cx);
+          if (failed || !longPoll) await new Promise(resolve => cx.timer.after(failed ? 250 : 100, resolve));
+        } catch {
+          if (!current()) return;
+          previous.clear();
+          this.setLinuxWatchUnavailable(root, true, cx);
+          await new Promise(resolve => cx.timer.after(1500, resolve));
+        }
+      }
+    });
+  }
+
+  setLinuxWatchUnavailable(root, unavailable, cx) {
+    if (Boolean(root.watchUnavailable) === unavailable) return;
+    root.watchUnavailable = unavailable;
+    cx.notify();
   }
 
   canChoose(scope) {

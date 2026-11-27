@@ -1,3 +1,5 @@
+import { openedTreeFolders } from "./tree-folders.js";
+
 function windowsPathKey(path) {
   const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
   if (normalized.startsWith("//?/unc/")) return `//${normalized.slice(8)}`;
@@ -6,18 +8,7 @@ function windowsPathKey(path) {
 }
 
 export function affectedWindowsFolders(root, paths) {
-  const opened = [];
-  const pending = [root];
-  while (pending.length) {
-    const folder = pending.pop();
-    opened.push(folder);
-    if (folder.listing?.status === "ready") {
-      for (const child of folder.listing.entries) {
-        if (child.open) pending.push(child);
-      }
-    }
-  }
-
+  const opened = openedTreeFolders(root);
   const rootKey = windowsPathKey(root.path);
   const changes = new Set(paths.map(windowsPathKey));
   if (!changes.size || [...changes].some(path => !path.startsWith(`${rootKey}/`))) {

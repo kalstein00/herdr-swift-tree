@@ -61,7 +61,7 @@ try {
 
     [IO.Directory]::CreateDirectory($stagedMod) | Out-Null
     foreach ($name in @('main.js', 'mod.json', 'windows-directory.js', 'linux-directory.js',
-            'windows-watch.js', 'windows-watch-connection.js')) {
+            'windows-watch.js', 'windows-watch-connection.js', 'linux-watch.js', 'tree-folders.js')) {
         Copy-Item -LiteralPath (Join-Path $source $name) -Destination $stagedMod
     }
     & (Join-Path $PSScriptRoot 'build-swifttree-windows.ps1') -OutputPath (Join-Path $stagedMod 'swifttree-windows.exe')
