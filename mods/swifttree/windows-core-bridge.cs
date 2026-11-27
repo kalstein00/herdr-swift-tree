@@ -28,7 +28,7 @@ internal sealed class SwiftTreeWindowsCoreBridge : IDisposable
         catch (InvalidOperationException) { }
     }
 
-    public object List(string machine, string script, string folder)
+    public object List(string machine, string script, string folder, string ancestors)
     {
         if (executable == null) return null;
         slots.Wait();
@@ -42,7 +42,7 @@ internal sealed class SwiftTreeWindowsCoreBridge : IDisposable
                 connection = idle.Count == 0 ? new Connection(executable) : idle.Pop();
                 connections.Add(connection);
             }
-            var response = connection.List(machine, script, folder);
+            var response = connection.List(machine, script, folder, ancestors);
             reusable = true;
             return response;
         }
@@ -97,14 +97,14 @@ internal sealed class SwiftTreeWindowsCoreBridge : IDisposable
             input = new StreamWriter(process.StandardInput.BaseStream, new UTF8Encoding(false, true)) { AutoFlush = true };
         }
 
-        public object List(string machine, string script, string folder)
+        public object List(string machine, string script, string folder, string ancestors)
         {
             input.WriteLine(SwiftTreeWindowsDirectory.Serialize(new
             {
                 jsonrpc = "2.0",
                 id = 1,
                 method = "machine.exec",
-                @params = new { on = machine, argv = new[] { "sh", "-c", script, "swifttree", folder }, timeout = 30 },
+                @params = new { on = machine, argv = new[] { "sh", "-c", script, "swifttree", folder, ancestors ?? "" }, timeout = 30 },
             }));
             var line = process.StandardOutput.ReadLine();
             if (line == null) throw new IOException("The Herdr core bridge disconnected.");
@@ -114,8 +114,9 @@ internal sealed class SwiftTreeWindowsCoreBridge : IDisposable
             if (result == null || result.timed_out || result.truncated) return null;
             if (result.code == 43) return new { status = "denied" };
             if (result.code == 44) return new { status = "missing" };
+            if (result.code == 45) return new { status = "cycle" };
             if (result.code != 0 || result.stdout == null) return null;
-            return new { status = "ready", entries = SwiftTreeWindowsDirectory.DecodeLinuxListing(result.stdout) };
+            return SwiftTreeWindowsDirectory.DecodeLinuxListing(result.stdout);
         }
 
         public void Dispose()

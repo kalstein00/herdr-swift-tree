@@ -19,27 +19,39 @@ probe_folder() {
 }
 
 probe_folder "$1" || exit $?
-find -H "$1" -mindepth 1 -maxdepth 1 -printf '%y%f\0' || {
+cd -P "$1" || {
+    probe_folder "$1" || exit $?
+    exit 1
+}
+identity=$(LC_ALL=C find -P . -maxdepth 0 -printf '%D:%i') || exit $?
+case ",$2," in
+    *",$identity,"*) exit 45 ;;
+esac
+printf '%s\0' "$identity"
+find -P . -mindepth 1 -maxdepth 1 \( -type l -printf 'l%Y%f\0' \) -o -printf '%y-%f\0' || {
     probe_folder "$1" || exit $?
     exit 1
 }
 probe_folder "$1" || exit $?
+current=$(LC_ALL=C find -H "$1" -maxdepth 0 -printf '%D:%i') || exit $?
+[ "$current" = "$identity" ] || exit 1
 printf '\0'
 `;
 
-export async function readLinuxDirectory(exec, appHome, folder, machine, access) {
+export async function readLinuxDirectory(exec, appHome, folder, machine, access, ancestors = "") {
   if (!folder.startsWith("/")) return { status: "failed" };
   try {
-    const fast = await access?.({ machine, folder, script: listFolder });
+    const fast = await access?.({ machine, folder, script: listFolder, ancestors });
     if (fast) return fast;
     // Keep the core's base64 output so names are decoded strictly on Windows.
     const { stdout } = await exec("hc", [
-      "exec", "--json", "--on", machine, "--", "sh", "-c", listFolder, "swifttree", folder,
+      "exec", "--json", "--on", machine, "--", "sh", "-c", listFolder, "swifttree", folder, ancestors,
     ]);
     const response = JSON.parse(stdout);
     if (response.timed_out) return { status: "failed" };
     if (response.code === 43) return { status: "denied" };
     if (response.code === 44) return { status: "missing" };
+    if (response.code === 45) return { status: "cycle" };
     if (response.code !== 0 || typeof response.stdout !== "string") return { status: "failed" };
 
     const scratch = `${appHome}/.swifttree-list-${Date.now()}-${Math.random().toString(36).slice(2)}`;

@@ -46,8 +46,10 @@ export async function connectWindowsService(args, current, cx) {
   }
 }
 
-export function connectWindowsWatcher(folder, current, cx) {
-  return connectWindowsService(["start-watch", folder], current, cx);
+export function connectWindowsWatcher(folder, current, cx, ancestors = null) {
+  const args = ["start-watch", folder];
+  if (ancestors !== null) args.push(ancestors || "-");
+  return connectWindowsService(args, current, cx);
 }
 
 export async function readWindowsMessages(socket, onMessage, limit = 2 * 1024 * 1024) {

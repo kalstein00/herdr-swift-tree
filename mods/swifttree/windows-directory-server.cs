@@ -43,7 +43,7 @@ internal static class SwiftTreeWindowsDirectoryServer
                     {
                         listing = request.machine == null
                             ? ReadLocal(request)
-                            : core.List(request.machine, request.script, request.folder);
+                            : core.List(request.machine, request.script, request.folder, request.ancestors);
                     }
                     catch (Exception) { }
                     send(SwiftTreeWindowsLocalService.WireMessage(new { id = request.id, listing = listing }));
@@ -54,10 +54,9 @@ internal static class SwiftTreeWindowsDirectoryServer
 
     private static object ReadLocal(Request request)
     {
-        SwiftTreeWindowsDirectory.Trace("list", request.folder, request.reason);
         try
         {
-            return new { status = "ready", entries = SwiftTreeWindowsDirectory.ReadDirectory(request.folder) };
+            return SwiftTreeWindowsDirectory.ReadLocalListing(request.folder, request.reason, request.ancestors);
         }
         catch (UnauthorizedAccessException) { return new { status = "denied" }; }
         catch (DirectoryNotFoundException) { return new { status = "missing" }; }
@@ -71,5 +70,6 @@ internal static class SwiftTreeWindowsDirectoryServer
         public string reason { get; set; }
         public string machine { get; set; }
         public string script { get; set; }
+        public string ancestors { get; set; }
     }
 }

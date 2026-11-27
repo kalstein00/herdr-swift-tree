@@ -52,7 +52,7 @@ export async function readLinuxWatch(exec, machine, folders, previous, current) 
     if (!current()) return null;
     const baseline = batch.map(folder => previous.get(folder) ?? "").join("\n");
     const { code, stdout } = await exec("sh", ["-c", sampleDirectories, "swifttree-remote-watch",
-      baseline, longPoll ? "20" : "1", ...batch.map(folder => folder.path),
+      baseline, longPoll ? "4" : "1", ...batch.map(folder => folder.path),
     ], { on: machine, timeout: 8000 });
     const rows = stdout.trimEnd().split("\n");
     if (code !== 0 || rows.length !== batch.length || rows.some(row => !/^(?:[0-9]+:[0-9]+:.+|\?)$/.test(row))) {

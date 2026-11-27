@@ -12,7 +12,7 @@ test("samples literal remote folder paths and carries each fingerprint across re
   const result = await readLinuxWatch(async (command, argv, options) => {
     assert.equal(command, "sh");
     assert.equal(argv[0], "-c");
-    assert.deepEqual(argv.slice(2), ["swifttree-remote-watch", `${fingerprint}\n`, "20", root.path, child.path]);
+    assert.deepEqual(argv.slice(2), ["swifttree-remote-watch", `${fingerprint}\n`, "4", root.path, child.path]);
     assert.deepEqual(options, { on: "test-linux", timeout: 8000 });
     return { code: 0, stdout: `${fingerprint}\n?\n` };
   }, "test-linux", folders, prior, () => true);

@@ -12,10 +12,10 @@ async function runReader(exec, appHome, args) {
   return { status: "failed" };
 }
 
-export async function readWindowsDirectory(exec, appHome, folder, reason = "open", access) {
-  const fast = await access?.({ folder, reason });
+export async function readWindowsDirectory(exec, appHome, folder, reason = "open", access, ancestors = "") {
+  const fast = await access?.({ folder, reason, ancestors });
   if (fast) return fast;
-  return runReader(exec, appHome, ["list", folder, reason]);
+  return runReader(exec, appHome, ["list", folder, reason, ancestors]);
 }
 
 export function sortLinuxListing(exec, appHome, listingPath) {

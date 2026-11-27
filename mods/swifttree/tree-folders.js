@@ -1,5 +1,13 @@
-export function makeEntry(path, name, directory, parent = null, index = -1) {
-  return { path, name, directory, parent, index, open: false, listing: null, request: null };
+export function makeEntry(path, name, directory, parent = null, index = -1, link = false) {
+  return { path, name, directory, parent, index, link, open: false, listing: null, request: null };
+}
+
+export function ancestorDirectoryIds(folder) {
+  const identities = [];
+  for (let parent = folder.parent; parent; parent = parent.parent) {
+    if (parent.listing?.identity) identities.push(parent.listing.identity);
+  }
+  return identities.join(",");
 }
 
 export function setFolderListing(folder, result, separator) {
@@ -11,15 +19,17 @@ export function setFolderListing(folder, result, separator) {
   const prefix = folder.path.replace(separator === "/" ? /\/+$/ : /[\\/]+$/, "");
   const retained = new Map();
   const expanded = new Set();
-  const previous = folder.listing?.retained;
+  const current = folder.listing;
+  const previous = folder.link && current?.identity !== result.identity ? null : current?.retained;
   if (previous?.size) {
     const byName = new Map([...previous.values()].map(entry => [entry.name, entry]));
     for (let index = 0; index < result.entries.length && byName.size; index++) {
-      const { name, directory } = result.entries[index];
+      const { name, directory, link = false, targetUnknown } = result.entries[index];
       const entry = byName.get(name);
       if (!entry) continue;
       byName.delete(name);
-      if (entry.directory !== directory) continue;
+      // Preserve the open directory and its watch while a link is unresolved.
+      if (entry.link !== link || (!targetUnknown && entry.directory !== directory)) continue;
       entry.index = index;
       retained.set(index, entry);
       if (entry.open) expanded.add(entry);
@@ -31,8 +41,8 @@ export function setFolderListing(folder, result, separator) {
 export function folderEntryAt(folder, listing, index) {
   const remembered = listing.retained.get(index);
   if (remembered) return remembered;
-  const { name, directory } = listing.entries[index];
-  return makeEntry(listing.prefix + name, name, directory, folder, index);
+  const { name, directory, link } = listing.entries[index];
+  return makeEntry(listing.prefix + name, name, directory, folder, index, link);
 }
 
 export function retainEntry(entry) {

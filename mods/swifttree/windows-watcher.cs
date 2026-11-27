@@ -10,36 +10,83 @@ internal sealed class SwiftTreeWindowsWatcher : IDisposable
 {
     private const int MaxPaths = 1024;
     private const int DisconnectCheckMilliseconds = 250;
+    private const int LinkCheckMilliseconds = 100;
     private const int KeepAliveMilliseconds = 10000;
     private readonly string root;
     private readonly object gate = new object();
     private readonly HashSet<string> pending = new HashSet<string>(StringComparer.Ordinal);
     private readonly AutoResetEvent changed = new AutoResetEvent(false);
-    private readonly FileSystemWatcher watcher;
+    private readonly HashSet<string> ancestors;
+    private FileSystemWatcher watcher;
+    private string linkIdentity;
     private bool failed;
     private bool disposed;
 
-    private SwiftTreeWindowsWatcher(string root)
+    private SwiftTreeWindowsWatcher(string root, string ancestors)
     {
         this.root = root;
-        watcher = new FileSystemWatcher(root)
+        if (ancestors == null)
+        {
+            StartWatcher();
+        }
+        else
+        {
+            this.ancestors = new HashSet<string>(ancestors.Split(','), StringComparer.Ordinal);
+            RefreshLinkWatcher(false);
+        }
+    }
+
+    private void StartWatcher()
+    {
+        var next = new FileSystemWatcher(root)
         {
             IncludeSubdirectories = true,
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName,
             InternalBufferSize = 16384,
         };
-        watcher.Created += (sender, item) => Add(item.FullPath);
-        watcher.Deleted += (sender, item) => Add(item.FullPath);
-        watcher.Renamed += (sender, item) => Add(item.OldFullPath, item.FullPath);
-        watcher.Error += (sender, item) => Lost(item.GetException());
-        watcher.EnableRaisingEvents = true;
+        next.Created += (sender, item) => Add(sender, item.FullPath);
+        next.Deleted += (sender, item) => Add(sender, item.FullPath);
+        next.Renamed += (sender, item) => Add(sender, item.OldFullPath, item.FullPath);
+        next.Error += (sender, item) => Lost(sender, item.GetException());
+        lock (gate) watcher = next;
+        try { next.EnableRaisingEvents = true; }
+        catch { StopWatcher(); throw; }
     }
 
-    public static int Run(string root, string endpoint)
+    private void StopWatcher()
+    {
+        FileSystemWatcher previous;
+        lock (gate)
+        {
+            previous = watcher;
+            watcher = null;
+        }
+        if (previous != null) previous.Dispose();
+    }
+
+    private void RefreshLinkWatcher(bool notify)
+    {
+        // A junction outside the watched tree can change without notifying
+        // either the root watcher or the previous target's directory handle.
+        var identity = SwiftTreeWindowsDirectory.TryReadDirectoryIdentity(root);
+        var changedTarget = identity != linkIdentity;
+        var canWatch = identity != null && !ancestors.Contains(identity);
+        if (!changedTarget && (watcher != null || !canWatch)) return;
+        StopWatcher();
+        linkIdentity = identity;
+        if (canWatch)
+        {
+            StartWatcher();
+            if (SwiftTreeWindowsDirectory.TryReadDirectoryIdentity(root) != identity) StopWatcher();
+        }
+        if (notify && (changedTarget || watcher != null)) Add(null, root);
+    }
+
+    public static int Run(string root, string endpoint, string ancestors)
     {
         try
         {
-            using (var watch = new SwiftTreeWindowsWatcher(root))
+            using (var watch = new SwiftTreeWindowsWatcher(root, ancestors))
             {
                 return SwiftTreeWindowsLocalService.Run(endpoint,
                     () => SwiftTreeWindowsDirectory.Trace("watch", root, "ready"), watch.Deliver);
@@ -50,11 +97,11 @@ internal sealed class SwiftTreeWindowsWatcher : IDisposable
         catch (ArgumentException) { return 1; }
     }
 
-    private void Add(params string[] paths)
+    private void Add(object sender, params string[] paths)
     {
         lock (gate)
         {
-            if (disposed || pending.Contains(root)) return;
+            if (disposed || (sender != null && sender != watcher) || pending.Contains(root)) return;
             foreach (var path in paths) pending.Add(path);
             if (pending.Count > MaxPaths)
             {
@@ -65,11 +112,11 @@ internal sealed class SwiftTreeWindowsWatcher : IDisposable
         }
     }
 
-    private void Lost(Exception error)
+    private void Lost(object sender, Exception error)
     {
         lock (gate)
         {
-            if (disposed) return;
+            if (disposed || sender != watcher) return;
             pending.Clear();
             pending.Add(root);
             failed |= !(error is InternalBufferOverflowException);
@@ -81,9 +128,16 @@ internal sealed class SwiftTreeWindowsWatcher : IDisposable
     private void Deliver(TcpClient client, NetworkStream stream)
     {
         var lastMessage = Stopwatch.StartNew();
+        var lastLinkCheck = Stopwatch.StartNew();
         while (!client.Client.Poll(0, SelectMode.SelectRead) || client.Available != 0)
         {
-            if (!changed.WaitOne(DisconnectCheckMilliseconds))
+            if (ancestors != null && lastLinkCheck.ElapsedMilliseconds >= LinkCheckMilliseconds)
+            {
+                RefreshLinkWatcher(true);
+                lastLinkCheck.Restart();
+            }
+            int wait = ancestors == null ? DisconnectCheckMilliseconds : LinkCheckMilliseconds;
+            if (!changed.WaitOne(wait))
             {
                 if (lastMessage.ElapsedMilliseconds >= KeepAliveMilliseconds)
                 {
@@ -114,7 +168,7 @@ internal sealed class SwiftTreeWindowsWatcher : IDisposable
 
     public void Dispose()
     {
-        watcher.Dispose();
+        StopWatcher();
         lock (gate)
         {
             disposed = true;

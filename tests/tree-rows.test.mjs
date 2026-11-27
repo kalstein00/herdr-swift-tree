@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isOpenTreeFolder, makeEntry, openedTreeFolders, releaseEntry, retainEntry, setFolderListing, setFolderOpen } from "../mods/swifttree/tree-folders.js";
+import { ancestorDirectoryIds, isOpenTreeFolder, makeEntry, openedTreeFolders, releaseEntry, retainEntry, setFolderListing, setFolderOpen } from "../mods/swifttree/tree-folders.js";
 import { treeRows } from "../mods/swifttree/tree-rows.js";
 
 const directory = name => ({ name, directory: true });
@@ -85,4 +85,29 @@ test("moving selection keeps only the current row and expanded folders alive", (
   list(root, [file("replacement")]);
   releaseEntry(selection);
   assert.equal(treeRows(root).rowAt(0).entry.name, "replacement");
+});
+
+test("only the current branch contributes ancestors, and retargeting a link retires its previous children", () => {
+  const listTarget = (folder, identity, entries) => setFolderListing(folder, { status: "ready", identity, entries }, "/");
+  const root = makeEntry("/workspace", "workspace", true);
+  const link = name => ({ name, directory: true, link: true });
+  listTarget(root, "1:10", [link("first"), link("second")]);
+  const links = treeRows(root);
+  const first = links.rowAt(0).entry;
+  const second = links.rowAt(1).entry;
+  setFolderOpen(first, true);
+  listTarget(first, "2:11", [directory("nested")]);
+  assert.equal(ancestorDirectoryIds(second), "1:10");
+  setFolderOpen(second, true);
+  listTarget(second, "2:11", []);
+  listTarget(root, "1:10", [{ name: "first", directory: false, link: true, targetUnknown: true }, link("second")]);
+  assert.equal(treeRows(root).rowAt(0).entry, first);
+  assert.equal(isOpenTreeFolder(first, root), true);
+  const nested = treeRows(root).rowAt(1).entry;
+  setFolderOpen(nested, true);
+  listTarget(nested, "2:12", []);
+  assert.equal(ancestorDirectoryIds(nested), "2:11,1:10");
+  listTarget(first, "2:21", [directory("nested")]);
+  assert.equal(isOpenTreeFolder(nested, root), false);
+  assert.deepEqual(new Set(openedTreeFolders(root)), new Set([root, first, second]));
 });

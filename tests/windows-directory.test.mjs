@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -37,8 +37,14 @@ test("reads literal NTFS paths and follows the default numeric Explorer collatio
     ...folders.sort(compare).map(name => ({ name, directory: true })),
     ...files.sort(compare).map(name => ({ name, directory: false })),
   ];
-  assert.deepEqual(await readWindowsDirectory(exec, root, folder), { status: "ready", entries: expected });
-  assert.deepEqual(await readWindowsDirectory(exec, root, join(folder, "Zeta")), { status: "ready", entries: [] });
+  const listing = await readWindowsDirectory(exec, root, folder);
+  assert.equal(listing.status, "ready");
+  assert.match(listing.identity, /^[0-9a-f]{16}:[0-9a-f]{32}$/);
+  assert.deepEqual(listing.entries, expected);
+  const empty = await readWindowsDirectory(exec, root, join(folder, "Zeta"));
+  assert.equal(empty.status, "ready");
+  assert.notEqual(empty.identity, listing.identity);
+  assert.deepEqual(empty.entries, []);
   assert.deepEqual(await readWindowsDirectory(exec, root, join(folder, "missing")), { status: "missing" });
 
   const endpoint = join(root, "directory-endpoint.json");
@@ -76,7 +82,7 @@ test("reads literal NTFS paths and follows the default numeric Explorer collatio
         responses.set(id, listing);
         if (responses.size === requests.length) break;
       }
-      assert.deepEqual(responses.get(1), { status: "ready", entries: expected });
+      assert.deepEqual(responses.get(1), listing);
       assert.deepEqual(responses.get(2), { status: "missing" });
 
       socket.write([3, 4].map(id => JSON.stringify({
@@ -97,4 +103,28 @@ test("reads literal NTFS paths and follows the default numeric Explorer collatio
     if (server.exitCode == null && server.signalCode == null) server.kill();
     await exit;
   }
+
+  const sdk = join(root, "external-sdk");
+  await mkdir(sdk);
+  await symlink(sdk, join(folder, "FirstSDK"), "junction");
+  await symlink(sdk, join(folder, "SecondSDK"), "junction");
+  await symlink(folder, join(sdk, "Ancestor"), "junction");
+  await writeFile(join(sdk, "header.h"), "");
+
+  const aliases = await readWindowsDirectory(exec, root, folder);
+  assert.deepEqual(aliases.entries.filter(entry => entry.link), [
+    { name: "FirstSDK", directory: true, link: true },
+    { name: "SecondSDK", directory: true, link: true },
+  ]);
+  const first = await readWindowsDirectory(exec, root, join(folder, "FirstSDK"), "open", undefined, listing.identity);
+  const second = await readWindowsDirectory(exec, root, join(folder, "SecondSDK"), "open", undefined, listing.identity);
+  assert.deepEqual(first, second);
+  assert.notEqual(first.identity, listing.identity);
+  assert.deepEqual(first.entries, [
+    { name: "Ancestor", directory: true, link: true },
+    { name: "header.h", directory: false },
+  ]);
+  assert.deepEqual(await readWindowsDirectory(
+    exec, root, join(folder, "FirstSDK", "Ancestor"), "open", undefined, `${first.identity},${listing.identity}`,
+  ), { status: "cycle" });
 });
