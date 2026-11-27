@@ -20,15 +20,15 @@ async function waitForEndpoint(file, current, cx) {
   throw new Error("Windows watcher did not start.");
 }
 
-export async function connectWindowsWatcher(folder, current, cx) {
+export async function connectWindowsService(args, current, cx) {
   const home = appHome();
   const scratch = `${home}/.swifttree-watch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const endpoint = `${scratch}/endpoint.json`;
   await mkdir(scratch);
   try {
     if (!current()) return null;
-    const { code } = await exec(windowsHelperPath(home), ["start-watch", folder, endpoint]);
-    if (code !== 0) throw new Error("Could not launch the Windows watcher.");
+    const { code } = await exec(windowsHelperPath(home), [...args, endpoint]);
+    if (code !== 0) throw new Error("Could not launch the Windows worker.");
     const { port, token } = await waitForEndpoint(endpoint, current, cx);
     if (!current()) return null;
     const socket = await connect("127.0.0.1", port);
@@ -46,22 +46,34 @@ export async function connectWindowsWatcher(folder, current, cx) {
   }
 }
 
-export async function readWindowsWatch(socket, onBatch) {
-  let buffer = "";
+export function connectWindowsWatcher(folder, current, cx) {
+  return connectWindowsService(["start-watch", folder], current, cx);
+}
+
+export async function readWindowsMessages(socket, onMessage, limit = 2 * 1024 * 1024) {
+  let parts = [];
+  let length = 0;
   for (;;) {
     const bytes = await socket.read(8192);
     if (bytes === null) return;
-    buffer += String.fromCharCode(...bytes);
-    if (buffer.length > 2 * 1024 * 1024) throw new Error("Windows watcher batch exceeds its limit.");
-    for (let end = buffer.indexOf("\n"); end !== -1; end = buffer.indexOf("\n")) {
-      const message = buffer.slice(0, end);
-      buffer = buffer.slice(end + 1);
-      if (!message) continue;
-      const paths = JSON.parse(message);
-      if (!Array.isArray(paths) || paths.some(path => typeof path !== "string")) {
-        throw new Error("Invalid Windows change batch.");
-      }
-      onBatch(paths);
+    const chunk = String.fromCharCode(...bytes).split("\n");
+    for (const [index, part] of chunk.entries()) {
+      length += part.length;
+      if (length > limit) throw new Error("Windows worker message exceeds its limit.");
+      if (part) parts.push(part);
+      if (index === chunk.length - 1) break;
+      if (length) onMessage(JSON.parse(parts.join("")));
+      parts = [];
+      length = 0;
     }
   }
+}
+
+export function readWindowsWatch(socket, onBatch) {
+  return readWindowsMessages(socket, paths => {
+    if (!Array.isArray(paths) || paths.some(path => typeof path !== "string")) {
+      throw new Error("Invalid Windows change batch.");
+    }
+    onBatch(paths);
+  });
 }

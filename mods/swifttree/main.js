@@ -1,6 +1,7 @@
 import { View, div } from "gpui-kit";
 import { Button, Editor, EditorState, h_flex, Input, InputState, Scrollbar, v_flex, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
 import { appHome, checking, exec, nextCommand, pickFolder, readTextFile, spaces, theme } from "herdr";
+import { createDirectoryAccess } from "./directory-access.js";
 import { readLinuxDirectory } from "./linux-directory.js";
 import { readLinuxWatch, reconcileLinuxWatch } from "./linux-watch.js";
 import { isOpenTreeFolder, openedTreeFolders } from "./tree-folders.js";
@@ -28,10 +29,10 @@ function choiceKey(space) {
   return space ? JSON.stringify(["swifttree-root", space.machine ?? null, space.id]) : null;
 }
 
-function readDirectory(machine, folder, reason) {
+function readDirectory(machine, folder, reason, access) {
   return machine
-    ? readLinuxDirectory(exec, appHome(), folder, machine)
-    : readWindowsDirectory(exec, appHome(), folder, reason);
+    ? readLinuxDirectory(exec, appHome(), folder, machine, access)
+    : readWindowsDirectory(exec, appHome(), folder, reason, access);
 }
 
 function appendRows(rows, folder, depth) {
@@ -60,6 +61,7 @@ export default class SwiftTree extends View {
     this.preview = null;
     this.previewEditor = null;
     if (!checking()) {
+      this.directoryAccess = createDirectoryAccess(cx);
       this.pathInput = InputState.new({ placeholder: "/path/to/folder" });
       this.pathInput.on("submit", (_event, cx) => this.submitRemotePath(this.scope, cx));
       cx.spawn(async () => {
@@ -139,7 +141,7 @@ export default class SwiftTree extends View {
     folder.listing ??= { status: "loading" };
     return new Promise(resolve => {
       cx.spawn(async cx => {
-        const result = await readDirectory(root.machine, folder.path, reason);
+        const result = await readDirectory(root.machine, folder.path, reason, this.directoryAccess);
         if (this.root !== root || folder.request !== request) {
           resolve(null);
           return;
@@ -282,7 +284,7 @@ export default class SwiftTree extends View {
         const folder = remotePath ?? await pickFolder({ prompt: "Open folder" });
         if (!folder || !this.canChoose(scope)) return;
 
-        const listing = await readDirectory(scope.machine, folder, "validate");
+        const listing = await readDirectory(scope.machine, folder, "validate", this.directoryAccess);
         if (!this.canChoose(scope)) return;
         if (listing.status !== "ready") {
           scope.error = messages[listing.status];

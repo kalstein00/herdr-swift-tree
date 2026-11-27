@@ -27,9 +27,11 @@ probe_folder "$1" || exit $?
 printf '\0'
 `;
 
-export async function readLinuxDirectory(exec, appHome, folder, machine) {
+export async function readLinuxDirectory(exec, appHome, folder, machine, access) {
   if (!folder.startsWith("/")) return { status: "failed" };
   try {
+    const fast = await access?.({ machine, folder, script: listFolder });
+    if (fast) return fast;
     // Keep the core's base64 output so names are decoded strictly on Windows.
     const { stdout } = await exec("hc", [
       "exec", "--json", "--on", machine, "--", "sh", "-c", listFolder, "swifttree", folder,

@@ -12,7 +12,9 @@ async function runReader(exec, appHome, args) {
   return { status: "failed" };
 }
 
-export function readWindowsDirectory(exec, appHome, folder, reason = "open") {
+export async function readWindowsDirectory(exec, appHome, folder, reason = "open", access) {
+  const fast = await access?.({ folder, reason });
+  if (fast) return fast;
   return runReader(exec, appHome, ["list", folder, reason]);
 }
 

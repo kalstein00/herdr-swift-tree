@@ -25,7 +25,7 @@ internal static class SwiftTreeWindowsDirectory
     [DllImport("icu.dll", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     private static extern void ucol_close(IntPtr collator);
 
-    private sealed class Entry
+    internal sealed class Entry
     {
         public string name { get; private set; }
         public bool directory { get; private set; }
@@ -44,12 +44,19 @@ internal static class SwiftTreeWindowsDirectory
         lock (Json) return Json.Serialize(value);
     }
 
+    internal static T Deserialize<T>(string value)
+    {
+        lock (Json) return Json.Deserialize<T>(value);
+    }
+
     public static int Main(string[] args)
     {
         Console.OutputEncoding = new UTF8Encoding(false);
         if (args.Length < 2) return 2;
         if (args[0] == "watch-worker" && args.Length == 3)
             return SwiftTreeWindowsWatcher.Run(Decode(args[1]), Decode(args[2]));
+        if (args[0] == "directory-worker" && args.Length == 3)
+            return SwiftTreeWindowsDirectoryServer.Run(Decode(args[1]), Decode(args[2]));
 
         try
         {
@@ -65,7 +72,10 @@ internal static class SwiftTreeWindowsDirectory
                     break;
                 case "start-watch":
                     if (args.Length != 3) return 2;
-                    return LaunchWatcher(args[1], args[2]);
+                    return LaunchWorker("watch-worker", args[1], args[2]);
+                case "start-directory":
+                    if (args.Length != 3) return 2;
+                    return LaunchWorker("directory-worker", args[1], args[2]);
                 default:
                     return 2;
             }
@@ -88,12 +98,12 @@ internal static class SwiftTreeWindowsDirectory
         Console.WriteLine(Serialize(new { status = status }));
     }
 
-    private static int LaunchWatcher(string root, string endpoint)
+    private static int LaunchWorker(string mode, string argument, string endpoint)
     {
         var start = new ProcessStartInfo
         {
             FileName = Process.GetCurrentProcess().MainModule.FileName,
-            Arguments = "watch-worker " + Encode(root) + " " + Encode(endpoint),
+            Arguments = mode + " " + Encode(argument) + " " + Encode(endpoint),
             UseShellExecute = true,
             WindowStyle = ProcessWindowStyle.Hidden,
         };
@@ -111,7 +121,7 @@ internal static class SwiftTreeWindowsDirectory
         return Encoding.UTF8.GetString(Convert.FromBase64String(value));
     }
 
-    private static Entry[] ReadDirectory(string folder)
+    internal static Entry[] ReadDirectory(string folder)
     {
         var entries = new DirectoryInfo(folder).GetFileSystemInfos()
             .Select(entry => new Entry(entry.Name, entry is DirectoryInfo)).ToArray();
@@ -123,7 +133,12 @@ internal static class SwiftTreeWindowsDirectory
 
     private static Entry[] ReadLinuxListing(string path)
     {
-        var bytes = Convert.FromBase64String(File.ReadAllText(path));
+        return DecodeLinuxListing(File.ReadAllText(path));
+    }
+
+    internal static Entry[] DecodeLinuxListing(string listing)
+    {
+        var bytes = Convert.FromBase64String(listing);
         var records = new UTF8Encoding(false, true).GetString(bytes).Split('\0');
         if (records.Length < 2 || records[records.Length - 2] != "" || records[records.Length - 1] != "")
             throw new FormatException("Incomplete directory listing.");

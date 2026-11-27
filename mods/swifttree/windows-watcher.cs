@@ -1,13 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Net.Sockets;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 
 internal sealed class SwiftTreeWindowsWatcher : IDisposable
@@ -41,61 +37,17 @@ internal sealed class SwiftTreeWindowsWatcher : IDisposable
 
     public static int Run(string root, string endpoint)
     {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
         try
         {
             using (var watch = new SwiftTreeWindowsWatcher(root))
             {
-                listener.Start(1);
-                var token = new byte[16];
-                using (var random = RandomNumberGenerator.Create()) random.GetBytes(token);
-                var password = Convert.ToBase64String(token);
-                var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-                File.WriteAllText(endpoint + ".tmp",
-                    SwiftTreeWindowsDirectory.Serialize(new { port = port, token = password }));
-                File.Move(endpoint + ".tmp", endpoint);
-                SwiftTreeWindowsDirectory.Trace("watch", root, "ready");
-
-                var deadline = Stopwatch.StartNew();
-                while (!listener.Pending())
-                {
-                    if (deadline.ElapsedMilliseconds >= 5000) return 2;
-                    Thread.Sleep(20);
-                }
-                using (var client = listener.AcceptTcpClient())
-                {
-                    client.ReceiveTimeout = 2000;
-                    client.SendTimeout = 2000;
-                    client.NoDelay = true;
-                    listener.Stop();
-                    var stream = client.GetStream();
-                    if (!Authenticate(stream, password)) return 2;
-                    watch.Deliver(client, stream);
-                }
+                return SwiftTreeWindowsLocalService.Run(endpoint,
+                    () => SwiftTreeWindowsDirectory.Trace("watch", root, "ready"), watch.Deliver);
             }
-            return 0;
         }
         catch (IOException) { return 1; }
         catch (UnauthorizedAccessException) { return 1; }
         catch (ArgumentException) { return 1; }
-        catch (SocketException) { return 1; }
-        finally
-        {
-            listener.Stop();
-        }
-    }
-
-    private static bool Authenticate(NetworkStream stream, string password)
-    {
-        var received = new byte[password.Length];
-        int offset = 0;
-        while (offset < received.Length)
-        {
-            int count = stream.Read(received, offset, received.Length - offset);
-            if (count == 0) return false;
-            offset += count;
-        }
-        return Encoding.ASCII.GetString(received) == password;
     }
 
     private void Add(params string[] paths)
@@ -152,24 +104,12 @@ internal sealed class SwiftTreeWindowsWatcher : IDisposable
             }
             if (paths.Length != 0)
             {
-                var message = WireMessage(paths);
+                var message = SwiftTreeWindowsLocalService.WireMessage(paths);
                 stream.Write(message, 0, message.Length);
                 lastMessage.Restart();
             }
             if (end) return;
         }
-    }
-
-    private static byte[] WireMessage(string[] paths)
-    {
-        var json = SwiftTreeWindowsDirectory.Serialize(paths);
-        var ascii = new StringBuilder(json.Length + 1);
-        foreach (char character in json)
-        {
-            if (character < 128) ascii.Append(character);
-            else ascii.Append("\\u").Append(((int)character).ToString("x4", CultureInfo.InvariantCulture));
-        }
-        return Encoding.ASCII.GetBytes(ascii.Append('\n').ToString());
     }
 
     public void Dispose()

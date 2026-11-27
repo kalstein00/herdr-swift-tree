@@ -77,3 +77,22 @@ VS Code의 마지막 행을 각각 클릭해 편집기에서 `row-0001000.txt`�
 | VCS | 합성 루트에는 Git 저장소가 없으며 VS Code 장식을 껐다. Herdr의 Files와 Changes가 공유하는 키는 머신과 저장소다. 저장소가 있는 후속 측정에서 공유된 프로세스 실행을 하나로 세며 두 패널의 소비를 별도 실행으로 합산하지 않는다. 이번 기준선에는 Git 실행 횟수 수치가 없다. [내장 Git 공유 경로](https://github.com/herdrdev/herdr-app/blob/9a9ae13d998e6ed74c76e8eb13bdeb2e1420f50c/defaults/mods/files/main.js#L6-L46) |
 
 네이티브 프레임과 입력/프레임 JSON, 파일명 인벤토리와 SSH 소켓 원본은 #3의 로컬 측정 증거로 보관했다. 큰 데이터셋은 생성과 목록 일치를 확인했다. 반복 UI 시간은 대표 1,000개 폴더에서 수집했으며, 대형 탐색과 설치 후보 검증은 후속 티켓에서 수행한다.
+
+## #11 직계 1,000개 첫 펼침
+
+Windows 11 Pro 26300, Herdr App 0.1.18과 core 0.1.22, VS Code 1.146.0과 Remote-SSH 0.128.0에서 같은 NTFS 및 QEMU ext4 대상을 사용했다. SSH는 연결을 수립한 상태로 게스트에 netem 20ms를 적용했다. VS Code는 Restricted Mode와 장식을 끈 기존 비교 설정을 유지했다. [#11](https://github.com/kalstein00/herdr-swift-tree/issues/11)
+
+기반 SwiftTree의 예비 표본은 NTFS 160.21–197.29ms, SSH 264.94–281.97ms였다. Windows에서는 클릭 후 단발 목록 프로세스의 읽기 진입까지 66.75–86.79ms가 소요됐다. 새 후보는 상주 Windows 작업 프로세스가 같은 ICU 정렬을 수행한다. 원격 목록은 상주 프로세스에서 기존 Herdr core의 `hc connect`를 재사용한다. [core의 연결 계약](https://github.com/herdrdev/herdr-core/blob/329cb66ebce5eca3d917fcf7364a099046979b49/schema/README.md#L21-L33)
+
+같은 폴더의 접기·새로 고침으로 시작한 별도 시험에서 VS Code SSH의 첫 행은 보였지만 독립 inotify 관측에 대상 디렉터리 열거가 없었다. 최종 비교에서는 문서에 정한 미사용 복제 폴더 방식을 적용했다. 환경별로 같은 부모에 `target-01`부터 `target-09`까지 만들고, 각각 직계 항목 1,000개의 이름·순서·해시 일치를 확인했다. 두 앱에서 모두 한 번도 펼치지 않은 경로였으며 별도 열거로 OS 캐시를 예열했다. SSH의 첫 대상에서는 두 앱이 처음 펼칠 때 실제 대상 디렉터리 열기를 관측했다.
+
+세 묶음에서 앱별 세 폴더를 교대로 처음 펼쳤다. NTFS에서는 VS Code부터, SSH에서는 SwiftTree부터 시작했다. 각 표본의 펼침 입력과 정렬된 `row-0000001.txt`가 보이는 첫 Windows 캡처 프레임을 QPC로 연결했다. SwiftTree의 NTFS와 SSH 양쪽에서 첫 파일을 클릭해 선택과 읽기 전용 미리보기를 확인했다. [Windows 입력과 화면 캡처 절차](windows-native-ui.md)
+
+| 환경·탐색기 | 표본 | p50 / p95 / p99 (ms) | 묶음별 p95 (ms) |
+| --- | ---: | ---: | --- |
+| NTFS · SwiftTree | 9 | 62.57 / 72.06 / 72.06 | 69.85, 69.65, 72.06 |
+| NTFS · VS Code | 9 | 82.06 / 98.67 / 98.67 | 98.67, 85.73, 87.20 |
+| SSH · SwiftTree | 9 | 114.93 / 134.69 / 134.69 | 129.64, 119.77, 134.69 |
+| SSH · VS Code | 9 | 121.13 / 143.08 / 143.08 | 143.08, 132.81, 122.52 |
+
+VS Code 묶음의 p95 편차 범위는 NTFS 85.73–98.67ms, SSH 122.52–143.08ms였다. 원시값의 최댓값과 최솟값 차이는 각각 12.94ms와 20.57ms였다. 사전에 정한 보류 조건은 두 환경 모두 발생하지 않았고, SwiftTree는 NTFS 100ms와 SSH 150ms의 절대 기준을 충족했다. 36개 결과 프레임과 입력 기록, 읽기 관측, 원시 표본 및 선택 화면은 작업의 로컬 `ticket-11`에 보관했다.
