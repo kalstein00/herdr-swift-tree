@@ -43,6 +43,7 @@ function setView(showMarkdown) {
   sourceView.hidden = showMarkdown;
   documentView.hidden = !showMarkdown;
   documentView.inert = !showMarkdown;
+  current?.renderedDocument?.setVisible(showMarkdown);
   showDocument.setAttribute("aria-pressed", showMarkdown);
   showSource.setAttribute("aria-pressed", !showMarkdown);
   if (showMarkdown) documentView.focus({ preventScroll: true });
@@ -50,8 +51,15 @@ function setView(showMarkdown) {
 }
 
 function resetDocument() {
+  current?.renderedDocument?.dispose();
   documentView.replaceChildren();
   documentView.scrollTop = 0;
+}
+
+function acknowledgeViewLayout(request) {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (current === request) bridge.postMessage(`begun:${request.id}`);
+  }));
 }
 
 showDocument.addEventListener("click", () => setView(true));
@@ -59,9 +67,10 @@ showSource.addEventListener("click", () => setView(false));
 
 async function showMarkdown(request) {
   try {
-    const { renderMarkdown } = await import("./markdown.js");
+    const { mountMarkdown } = await import("./markdown.js");
     if (current !== request) return;
-    documentView.append(renderMarkdown(editor.state.doc.toString()));
+    request.renderedDocument = mountMarkdown(documentView, editor.state.doc.toString());
+    bridge.postMessage(`markdown:attached:${request.id}`);
     status.textContent = "Read-only";
   } catch {
     if (current !== request) return;
@@ -91,13 +100,13 @@ bridge.addEventListener("message", ({ data }) => {
     case "begin":
       filename.textContent = data.name;
       status.textContent = "Reading file…";
+      resetDocument();
       current = {
         id: data.id,
         markdown: /\.(?:md|markdown)$/i.test(data.name),
         prefixEndsInCR: data.text.endsWith("\r"),
         parts: [],
       };
-      resetDocument();
       viewMode.hidden = !current.markdown;
       sourceView.hidden = false;
       editor.setState(editorState(data.text));
@@ -105,7 +114,7 @@ bridge.addEventListener("message", ({ data }) => {
       editor.scrollDOM.scrollLeft = 0;
       editor.dispatch({ effects: EditorView.scrollIntoView(0, { y: "start", x: "start" }) });
       setView(current.markdown);
-      bridge.postMessage(`begun:${data.id}`);
+      acknowledgeViewLayout(current);
       void showLanguage(data.name, current);
       break;
     case "append":
@@ -126,10 +135,10 @@ bridge.addEventListener("message", ({ data }) => {
       break;
     }
     case "clear":
+      resetDocument();
       current = null;
       filename.textContent = "";
       status.textContent = "Read-only";
-      resetDocument();
       documentView.hidden = true;
       documentView.inert = true;
       viewMode.hidden = true;

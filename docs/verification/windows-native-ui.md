@@ -213,6 +213,20 @@ uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --w
 
 SSH에서는 같은 크기의 자료를 격리된 원격 탐색 루트에 복사한 뒤 위 순서를 반복한다. 별도 SSH 연결에서 파일 lease로 A의 열기를 늦추고 아래쪽 **×**를 누른 뒤 B를 연다. 원격 연결이 끊겼을 때 오류를 캡처하고 다시 연결한 뒤 같은 경로를 열어 최신 내용을 확인한다. 이미 받은 첫 부분이 표시되는 동안 32 MiB 파일을 교체하거나 메타데이터가 그대로인 매핑 쓰기를 수행하고 파일 변경 안내를 캡처한다. 범위 사이에서 SSH 연결이 교체되면 기존 요청이 중단 상태로 끝나는지 확인한다.
 
+#### 장문 첫 화면 시간
+
+`scripts/preview_benchmark_fixture.py <folder> NTFS`와 `scripts/preview_benchmark_fixture.py <folder> SSH`로 8 MiB 원문과 280개 섹션의 Markdown을 각각 두 개씩 만든다. SSH 쪽 자료는 격리한 원격 디렉터리에 복사한다. Windows 밝은 테마와 디스플레이 배율 100%에서 격리 Herdr의 클라이언트 크기를 1600×1025로 맞춘다. Files에 검증 폴더만 열고 네 파일이 번호 순서로 표시되는지 확인한다.
+
+각 파일을 한 번 열어 첫 본문, Markdown의 첫 다이어그램과 수식이 표시된 1290×804 확대 창을 Windows Graphics Capture로 저장한다. 캡처 이름은 `source-A.png`, `source-B.png`, `design-A.png`, `design-B.png`로 저장한다. 프로젝트의 `scripts/capture_baseline.py`에 확대 창 HWND와 `--seconds 1 --crop 0 0 1290 804`를 주면 기준 프레임을 캡처할 수 있다. 격리 Herdr를 시작하기 전에 네이티브 추적 경로 `SWIFTTREE_PREVIEW_TRACE`를 지정한다.
+
+```powershell
+uv run --isolated --python 3.13 --with opencv-python --with numpy --with windows-capture python -B scripts/preview_benchmark.py <Herdr-HWND> <output> <references> --profile <isolated-app-home> --trace <trace-file> --shape design --mode different --count 20
+```
+
+`--shape source`와 `--shape design` 각각에 대해 `--mode cold`, `different`, `reopen`을 실행한다. 원격 공간에서는 `--ssh`를 추가한다. 콜드 표본은 클릭 전에 격리 프로필의 확대 프로세스를 종료하고, 같은 WebView2 사용자 데이터로 프로세스를 다시 시작한다. 다른 파일은 두 파일을 교대로 열고, 다시 열기는 같은 파일을 반복한다. 스크립트는 시작한 프로세스 또는 준비된 프로세스가 실제로 사용됐는지 네이티브 추적으로 확인한다.
+
+첫 본문은 파일마다 다른 본문 표식이 처음 보인 Windows Graphics Capture 프레임으로 판정한다. Markdown은 첫 다이어그램과 첫 블록 수식의 프레임도 따로 기록한다. `samples.json`에 실제 클릭 시각, 프레임 시각, 원시 표본과 p50·p95를 보관하고, SSH의 테스트 연결 RTT를 함께 기록한다. 첫 프레임의 파일명과 본문을 직접 연다. 문서 내 링크로 마지막 섹션으로 이동하고 필요한 만큼 스크롤해 마지막 다이어그램과 수식 및 원문 끝까지 확인한다.
+
 ## Windows 외부 변경 감시 검증
 
 격리된 NTFS 합성 루트를 Git 저장소로 초기화하고 `Left`, `Right`, `Burst`를 만든다. 격리된 Herdr 프로세스를 시작하기 전에 쓰기 가능한 별도 절대 경로를 환경 변수 `SWIFTTREE_WINDOWS_TRACE`에 넣는다. 기록에서 `watch/ready`를 확인하고 실제 Files의 `Left`와 `Right`를 펼친다.

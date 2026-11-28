@@ -41,6 +41,13 @@ main { position: absolute; inset: 0; }
   word-break: normal;
 }
 #document-view a[href^="#"] { text-decoration: underline; }
+#document-view > article > section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 32rem;
+}
+#document-view .preview-diagram,
+#document-view .preview-math-block { display: block; min-height: 2em; }
+#document-view .preview-diagram { white-space: pre-wrap; }
 #document-view [data-type="mermaid"] img { display: block; max-width: 100%; }
 .cm-editor { height: 100%; }
 .cm-scroller { overflow: auto; font: 14px/1.5 Consolas, monospace !important; }

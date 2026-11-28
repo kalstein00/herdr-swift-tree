@@ -43,6 +43,8 @@ Git checkout이나 Perforce sync가 진행되는 동안에도 스크롤과 방�
 
 `.md`와 `.markdown` 파일은 확대 창의 **문서 보기**에서 제목, 목록, 표, 코드 블록, 문서 내 링크, Mermaid와 수식을 표시합니다. **원문**을 누르면 같은 파일을 읽기 전용으로 볼 수 있습니다. 아래쪽 미리보기는 원문을 표시합니다.
 
+긴 문서는 전체 참조를 해석한 뒤 첫 섹션을 표시합니다. Mermaid와 수식은 스크롤하거나 링크를 따라 해당 위치에 도달하면 표시됩니다. 확대 창은 Herdr가 미리 준비한 WebView2를 다시 사용합니다. [Windows·SSH 첫 화면 성능 검증](docs/verification/preview-performance.md)
+
 ## 기본 Files로 돌아가기
 
 `Ctrl+Shift+P`에서 `layout`을 검색하고 **Layout: Herdr**를 선택합니다. 상단 **Files** 버튼으로 기본 패널을 열 수 있습니다. 다시 SwiftTree를 사용하려면 **Layout: Swifttree**를 선택합니다.

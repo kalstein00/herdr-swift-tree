@@ -25,7 +25,7 @@ internal sealed class SwiftTreePreviewHost : Form
     private readonly string tracePath = Environment.GetEnvironmentVariable("SWIFTTREE_PREVIEW_TRACE");
     private readonly object traceGate = new object();
     private readonly Dictionary<string, SwiftTreeWindowsCoreBridge> cores = new Dictionary<string, SwiftTreeWindowsCoreBridge>();
-    private readonly WebView2 web = new WebView2 { Dock = DockStyle.Fill, Visible = false };
+    private readonly WebView2 web = new WebView2 { Dock = DockStyle.Fill };
     private readonly Label status = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
     private readonly Timer ownerTimer = new Timer { Interval = 250 };
     private IntPtr ownerWindow;
@@ -48,6 +48,7 @@ internal sealed class SwiftTreePreviewHost : Form
         ShowInTaskbar = false;
         KeyPreview = true;
         BackColor = Color.FromArgb(25, 28, 34);
+        status.BackColor = BackColor;
         status.ForeColor = Color.White;
         web.DefaultBackgroundColor = BackColor;
         Controls.Add(web);
@@ -188,6 +189,8 @@ internal sealed class SwiftTreePreviewHost : Form
         if (message == "close:" + revision && Visible) HidePreview();
         if (message == "begun:" + revision && Visible && opened != null)
             RevealDocument(opened, generation);
+        if (message == "markdown:attached:" + revision && Visible && opened != null)
+            Trace("markdown/attached");
         if (message != "ready" || ready || unavailable) return;
         ready = true;
         Trace("prewarm/ready/" + web.CoreWebView2.BrowserProcessId);
@@ -201,7 +204,6 @@ internal sealed class SwiftTreePreviewHost : Form
             await Task.Run(() => VerifySource(request));
             if (revision != generation) return;
             status.Visible = false;
-            web.Visible = true;
             web.Focus();
             Trace("document/begun");
         }
@@ -388,9 +390,9 @@ internal sealed class SwiftTreePreviewHost : Form
 
     private void ShowStatus(string message)
     {
-        web.Visible = false;
         status.Text = message;
         status.Visible = true;
+        status.BringToFront();
     }
 
     private void HidePreview()
@@ -399,7 +401,6 @@ internal sealed class SwiftTreePreviewHost : Form
         Trace("hide");
         ++generation;
         opened = null;
-        web.Visible = false;
         if (ownerWindow != IntPtr.Zero) EnableWindow(ownerWindow, true);
         Hide();
         if (ownerWindow != IntPtr.Zero) SetForegroundWindow(ownerWindow);
