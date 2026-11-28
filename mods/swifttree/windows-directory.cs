@@ -348,12 +348,27 @@ internal static class SwiftTreeWindowsDirectory
             ? resolved.Substring(extendedPath.Length) : resolved;
     }
 
+    private static bool IsSearchDescendant(string folder, string root)
+    {
+        var boundary = Path.GetFullPath(root).TrimEnd('\\', '/');
+        for (var directory = new DirectoryInfo(folder); directory != null; directory = directory.Parent)
+        {
+            if (String.Equals(directory.FullName.TrimEnd('\\', '/'), boundary, StringComparison.OrdinalIgnoreCase))
+                return true;
+            if ((directory.Attributes & FileAttributes.ReparsePoint) != 0) return false;
+        }
+        return false;
+    }
+
     internal static object ReadLocalListing(string folder, string reason, string ancestors)
     {
+        bool noLink = reason == "search-child";
+        if (noLink && !IsSearchDescendant(folder, ancestors))
+            return new { status = "missing" };
         using (var opened = OpenFolder(folder))
         {
             var identity = Identity(opened);
-            if ((ancestors ?? "").Split(',').Contains(identity)) return new { status = "cycle" };
+            if (!noLink && (ancestors ?? "").Split(',').Contains(identity)) return new { status = "cycle" };
 
             // Read the resolved directory so a retargeted link cannot redirect
             // the enumeration after the ancestry check.
@@ -363,6 +378,8 @@ internal static class SwiftTreeWindowsDirectory
                 entry is DirectoryInfo && (entry.Attributes & FileAttributes.ReparsePoint) != 0
                     ? new DirectoryLink(entry.Name) : new Entry(entry.Name, entry is DirectoryInfo)).ToArray();
             var sorted = Sort(entries);
+            if (noLink && !IsSearchDescendant(folder, ancestors))
+                return new { status = "missing" };
             using (var current = OpenFolder(folder))
             {
                 if (Identity(current) != identity)

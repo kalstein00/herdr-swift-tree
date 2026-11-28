@@ -254,3 +254,11 @@ uv run --isolated --python 3.13 --with opencv-python --with numpy --with windows
 SwiftTree를 설치한 뒤 원래 루트의 터미널을 포커스하고, PowerShell 7에서 검증 창 PID와 캡처 폴더를 windows-file-search.ps1에 넘긴다. AlternateRoot는 두 번째 루트의 절대 경로다. 테스트는 Win32 키·마우스 입력으로 Ctrl+P, 파일명 입력, 선택과 취소를 수행하고 Herdr 캡처와 터미널 출력으로 결과를 확인한다.
 
 Git 검증은 -GitScope를 사용한다. 합성 Git 저장소의 sub/nested에 PolicyKeep.txt(본문 GIT KEEP PREVIEW PROOF), PolicyIgnored.txt, PolicyNested.txt를 둔다. 루트와 nested의 .gitignore로 각각 무시 대상을 지정한다. 루트에는 PolicyOutside.txt를 둔다. 저장소 루트에서 -GitScope -GitRepositoryRoot, sub에서는 -GitScope를 실행해 상대 범위와 미리보기 본문을 확인한다.
+
+## SSH Linux 파일 이름 검색 검증
+
+NTFS 검증과 같은 Alpha 및 Bravo 동명 파일 구조를 SSH Linux에 만든다. 본문 표식은 REMOTE FIRST PREVIEW PROOF와 REMOTE SECOND PREVIEW PROOF다. Git 저장소에 ScopeRemote.txt, .git 내부의 ScopeGit.txt, .gitignore가 무시하는 ScopeIgnored.txt, 외부 디렉터리 심볼릭 링크 아래의 ScopeLink.txt를 둔다. 연결된 Linux space에서 터미널을 포커스하고 windows-file-search.ps1을 -Remote로 실행한다.
+
+지연 검증에는 루프백으로 내보낸 SSH 포트와 별도 Herdr 머신을 사용한다. ssh-delay-relay.py에 빈 제어 폴더와 SSH 포트를 넘긴다. 생성된 port 파일의 루프백 포트를 별도 머신의 SSH 접속 포트로 사용하고, 기존 게스트의 호스트 키를 검증한다. 지연용 SSH space가 활성화된 상태에서 windows-file-search.ps1에 -SwitchToSpace로 NTFS space ID, -DelayControlDirectory로 제어 폴더, -RelayObserverMachine으로 같은 게스트에 직접 연결한 관측용 Herdr 머신 이름을 넘긴다. NTFS 루트에는 본문이 LOCAL SCOPE PROOF인 build/ScopeBuild.txt가 있어야 한다. 테스트는 수신 패킷 보류, 원격 검색 중 표시, 같은 검색창에서 NTFS로 전환, 원격 목록 작성 확인, 패킷 재개와 목록 정리, NTFS 본문 확인을 순서대로 수행한다. 제어 표식을 매번 초기화하고 테스트가 실패해도 hold를 제거한다.
+
+NTFS와 SSH Git 트리의 각 루트에 MeasureNeedleA.txt와 RefreshProof.txt를 두고, 64개 직계 폴더마다 160개 파일을 넣는다. 각 트리의 일반 파일은 총 10,242개다. 각 space에서 -Measure로 1600×1025 참조 캡처를 만든 뒤 scripts/file_search_benchmark.py에 창 HWND, 참조 폴더, 출력 폴더를 넘긴다. 이 스크립트는 기존 Windows Graphics Capture 경로로 세 번 반복해 Ctrl+P·검색어 입력부터 첫 일치 프레임까지와 열거 완료 후 검색어 수정부터 갱신 프레임까지의 QPC 수치를 기록한다. 입력 시퀀스 전송 시간이 포함되며 목표 지연으로 사용하지 않는다. 실제 측정은 samples.json과 판정한 프레임을 남긴다.

@@ -38,14 +38,36 @@ current=$(LC_ALL=C find -H "$1" -maxdepth 0 -printf '%D:%i') || exit $?
 printf '\0'
 `;
 
-export async function readLinuxDirectory(exec, appHome, folder, machine, access, ancestors = "") {
+const requireSearchPath = String.raw`
+search_path_allowed() {
+    candidate=$1
+    root=$2
+    while [ "$candidate" != "$root" ]; do
+        if [ "$root" != / ]; then
+            case "$candidate" in "$root"/*) ;; *) return 1 ;; esac
+        fi
+        [ ! -L "$candidate" ] || return 1
+        parent=${"${candidate%/*}"}
+        [ -n "$parent" ] || parent=/
+        [ "$parent" != "$candidate" ] || return 1
+        candidate=$parent
+    done
+}
+search_path_allowed "$1" "$2" || exit 44
+`;
+
+export async function readLinuxDirectory(exec, appHome, folder, machine, access, ancestors = "", searchRoot = "") {
   if (!folder.startsWith("/")) return { status: "failed" };
+  const script = searchRoot
+    ? `${requireSearchPath}\nsearch_root=$2\nset -- "$1" ""\n${listFolder}\nsearch_path_allowed "$1" "$search_root" || exit 44\n`
+    : listFolder;
+  const context = searchRoot ? searchRoot.replace(/\/+$/, "") || "/" : ancestors;
   try {
-    const fast = await access?.({ machine, folder, script: listFolder, ancestors });
+    const fast = await access?.({ machine, folder, script, ancestors: context });
     if (fast) return fast;
     // Keep the core's base64 output so names are decoded strictly on Windows.
     const { stdout } = await exec("hc", [
-      "exec", "--json", "--on", machine, "--", "sh", "-c", listFolder, "swifttree", folder, ancestors,
+      "exec", "--json", "--on", machine, "--", "sh", "-c", script, "swifttree", folder, context,
     ]);
     const response = JSON.parse(stdout);
     if (response.timed_out) return { status: "failed" };
