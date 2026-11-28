@@ -5,6 +5,7 @@
     [switch]$GitScope,
     [switch]$GitRepositoryRoot,
     [switch]$GitMetadataRoot,
+    [switch]$QuotedMatch,
     [switch]$Remote,
     [string]$SwitchToSpace,
     [string]$DelayControlDirectory,
@@ -202,6 +203,17 @@ if ($SwitchToSpace) {
 }
 
 Open-HerdrSearch
+
+if ($QuotedMatch) {
+    $crop = @(410, 80, 780, 190)
+    Send-HerdrKeys @('52', '53')
+    Assert-HerdrText 'search-fuzzy-rs' $crop @('MainRS.txt', 'RogueSkip.txt')
+    Send-HerdrKeys @('11+41', '10+de', '52', '53', '10+de')
+    Assert-HerdrText 'search-quoted-rs' $crop @('MainRS.txt') @('RogueSkip.txt')
+    Send-HerdrKeys @('0d')
+    Assert-HerdrText 'search-quoted-preview' @(1130, 550, 450, 230) @('EXACT QUOTE PROOF')
+    return
+}
 
 if ($GitMetadataRoot) {
     Send-HerdrKeys @('53', '43', '4f', '50', '45', '47', '49', '54')

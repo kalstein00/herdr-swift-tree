@@ -147,24 +147,36 @@ export async function collectFiles(root, separator, readDirectory, isCurrent, pu
 }
 
 export function matchingFiles(files, query) {
-  const letters = [...query.trim()].map(letter => letter.toLowerCase());
+  const input = query.trim();
+  const quoted = input.startsWith('"') && input.endsWith('"');
+  const letters = [...input.replaceAll('"', "")].map(letter => letter.toLowerCase());
   if (!letters.length) return [];
   const matches = [];
   for (const file of files) {
     const name = [...file.name];
+    const foldedName = name.map(letter => letter.toLowerCase());
+    const start = foldedName.findIndex((letter, index) =>
+      letter === letters[0] && letters.every((expected, offset) => foldedName[index + offset] === expected));
+    if (start >= 0) {
+      const hits = letters.map((_, offset) => start + offset);
+      matches.push({ file, hits, rank: start === 0 ? 2 : 1, score: -name.length });
+      continue;
+    }
+    if (quoted) continue;
+
     const hits = [];
     let score = 0;
     for (let index = 0; index < name.length && hits.length < letters.length; index++) {
-      if (name[index].toLowerCase() !== letters[hits.length]) continue;
+      if (foldedName[index] !== letters[hits.length]) continue;
       const previous = hits.at(-1);
       if (index === 0 || /[._ -]/.test(name[index - 1])) score += 5;
       if (previous === index - 1) score += 3;
       hits.push(index);
     }
     if (hits.length === letters.length) {
-      matches.push({ file, hits, score: score - name.length / 100 });
+      matches.push({ file, hits, rank: 0, score: score - name.length / 100 });
     }
   }
-  return matches.sort((left, right) => right.score - left.score ||
+  return matches.sort((left, right) => right.rank - left.rank || right.score - left.score ||
     left.file.name.localeCompare(right.file.name) || left.file.folder.localeCompare(right.file.folder));
 }
