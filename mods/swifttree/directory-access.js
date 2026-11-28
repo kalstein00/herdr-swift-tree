@@ -18,9 +18,10 @@ export function createDirectoryAccess(cx) {
   let active = null;
   let startup = null;
   let restartAfter = 0;
+  let closed = false;
 
   function start() {
-    if (startup || Date.now() < restartAfter) return startup;
+    if (closed || startup || Date.now() < restartAfter) return startup;
     let ready;
     startup = new Promise(resolve => { ready = resolve; });
     cx.spawn(async cx => {
@@ -28,7 +29,8 @@ export function createDirectoryAccess(cx) {
       let socket;
       try {
         const corePid = await resolveCorePid();
-        socket = await connectWindowsService(["start-directory", corePid], () => true, cx);
+        socket = await connectWindowsService(["start-directory", corePid], () => !closed, cx);
+        if (!socket || closed) return;
         active = { socket, pending, id: 0, writes: Promise.resolve() };
         ready(active);
         await readWindowsMessages(socket, reply => {
@@ -50,8 +52,9 @@ export function createDirectoryAccess(cx) {
   }
 
   start();
-  return async request => {
+  const requestDirectory = async request => {
     const connection = active ?? await start();
+    if (closed) return { status: "cancelled" };
     if (!connection || connection.pending.size >= 32) return null;
     const { socket, pending } = connection;
     const id = ++connection.id;
@@ -64,7 +67,7 @@ export function createDirectoryAccess(cx) {
       pending.set(id, listing => {
         pending.delete(id);
         expiry.cancel();
-        resolve(listing);
+        resolve(closed ? { status: "cancelled" } : listing);
       });
       connection.writes = connection.writes.then(() => socket.write(JSON.stringify({ ...request, id }) + "\n")).catch(() => {
         pending.get(id)?.(null);
@@ -72,4 +75,9 @@ export function createDirectoryAccess(cx) {
       });
     });
   };
+  requestDirectory.close = () => {
+    closed = true;
+    active?.socket.close();
+  };
+  return requestDirectory;
 }

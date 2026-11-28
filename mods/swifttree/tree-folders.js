@@ -10,13 +10,16 @@ export function ancestorDirectoryIds(folder) {
   return identities.join(",");
 }
 
+export function folderPrefix(path, separator) {
+  return path.replace(separator === "/" ? /\/+$/ : /[\\/]+$/, "") + separator;
+}
+
 export function setFolderListing(folder, result, separator) {
   if (result.status !== "ready") {
     folder.listing = result;
     return;
   }
 
-  const prefix = folder.path.replace(separator === "/" ? /\/+$/ : /[\\/]+$/, "");
   const retained = new Map();
   const expanded = new Set();
   const current = folder.listing;
@@ -35,7 +38,7 @@ export function setFolderListing(folder, result, separator) {
       if (entry.open) expanded.add(entry);
     }
   }
-  folder.listing = { ...result, prefix: prefix + separator, retained, expanded };
+  folder.listing = { ...result, prefix: folderPrefix(folder.path, separator), retained, expanded };
 }
 
 export function folderEntryAt(folder, listing, index) {

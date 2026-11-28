@@ -45,6 +45,10 @@ Git checkout이나 Perforce sync가 진행되는 동안에도 스크롤과 방�
 
 긴 문서는 전체 참조를 해석한 뒤 첫 섹션을 표시합니다. Mermaid와 수식은 스크롤하거나 링크를 따라 해당 위치에 도달하면 표시됩니다. 확대 창은 Herdr가 미리 준비한 WebView2를 다시 사용합니다. [Windows·SSH 첫 화면 성능 검증](docs/verification/preview-performance.md)
 
+## 파일 이름 검색
+
+Windows 로컬 space의 SwiftTree 레이아웃에서 Ctrl+P를 눌러 현재 탐색 루트의 파일을 이름으로 검색합니다. Files 패널이 닫혀 있거나 터미널에 포커스가 있어도 검색창이 열립니다. 검색 결과에는 접힌 폴더의 파일도 표시됩니다. 예를 들어 trows로 tree-rows.js를 찾고, 파일명 옆의 상대 경로로 동명 파일을 구별할 수 있습니다. 위·아래 방향키와 Enter 또는 클릭으로 미리보기를 엽니다. Esc는 검색창을 닫고 이전 포커스로 돌아갑니다. 검색은 .git 내부와 디렉터리 junction을 건너뜁니다.
+
 ## 기본 Files로 돌아가기
 
 `Ctrl+Shift+P`에서 `layout`을 검색하고 **Layout: Herdr**를 선택합니다. 상단 **Files** 버튼으로 기본 패널을 열 수 있습니다. 다시 SwiftTree를 사용하려면 **Layout: Swifttree**를 선택합니다.

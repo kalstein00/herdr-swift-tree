@@ -28,6 +28,7 @@ $source = Join-Path (Split-Path -Parent $PSScriptRoot) 'mods/swifttree'
 $AppHome = (Resolve-Path -LiteralPath $AppHome).Path
 $layoutPath = Join-Path $AppHome 'layouts/swifttree.json'
 $modPath = Join-Path $AppHome 'mods/swifttree'
+$keysPath = Join-Path $AppHome 'keys.json'
 $env:HERDR_APP_HOME = $AppHome
 
 $lockPath = Join-Path $AppHome '.swifttree-install.lock'
@@ -47,6 +48,8 @@ $stagedMod = Join-Path $staging 'candidate'
 $previousMod = Join-Path $staging 'previous'
 $stagedLayout = Join-Path $staging 'layout.json'
 $previousLayout = Join-Path $staging 'layout.previous.json'
+$stagedKeys = Join-Path $staging 'keys.json'
+$previousKeys = Join-Path $staging 'keys.previous.json'
 $keepStaging = $false
 $modInstalled = $false
 
@@ -72,7 +75,7 @@ try {
     [IO.Directory]::CreateDirectory($stagedMod) | Out-Null
     foreach ($name in @('main.js', 'mod.json', 'windows-directory.js', 'linux-directory.js',
             'windows-watch.js', 'windows-watch-connection.js', 'linux-watch.js', 'tree-folders.js', 'tree-rows.js',
-            'directory-access.js', 'windows-preview.js')) {
+            'directory-access.js', 'windows-preview.js', 'file-search.js', 'file-search-view.js')) {
         Copy-Item -LiteralPath (Join-Path $source $name) -Destination $stagedMod
     }
     & (Join-Path $PSScriptRoot 'build-swifttree-windows.ps1') -OutputPath (Join-Path $stagedMod 'swifttree-windows.exe')
@@ -80,6 +83,20 @@ try {
     $layoutChanged = $blocks[0].content.mod -ne 'swifttree'
     if ($layoutChanged) {
         $blocks[0].content.mod = 'swifttree'
+    }
+
+    $keys = Get-Content -LiteralPath $keysPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (!$keys.PSObject.Properties['layout:swifttree']) {
+        $keys | Add-Member -NotePropertyName 'layout:swifttree' -NotePropertyValue ([pscustomobject]@{})
+    }
+    $swiftTreeKeys = $keys.'layout:swifttree'
+    if (!$swiftTreeKeys.PSObject.Properties['ctrl-p']) {
+        $swiftTreeKeys | Add-Member -NotePropertyName 'ctrl-p' -NotePropertyValue 'mod.open:swifttree'
+        [IO.File]::WriteAllText($stagedKeys, ($keys | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
+    }
+    if ($swiftTreeKeys.'ctrl-p' -ne 'mod.open:swifttree' -or
+        ($keys.terminal -and $keys.terminal.PSObject.Properties['ctrl-p'])) {
+        Write-Warning 'An existing Ctrl+P binding can take precedence over SwiftTree file search. Review the terminal and layout:swifttree sections in keys.json.'
     }
     if (!(Find-LayoutNode $layout 'swifttree-preview-warmup')) {
         $layout.children = @(@{
@@ -107,12 +124,18 @@ try {
     if ([IO.File]::Exists($stagedLayout)) {
         [IO.File]::Replace($stagedLayout, $layoutPath, $previousLayout)
     }
+    if ([IO.File]::Exists($stagedKeys)) {
+        [IO.File]::Replace($stagedKeys, $keysPath, $previousKeys)
+    }
 
     Invoke-HerdrLayout @('do', 'layout.switch', '--name', 'swifttree')
 }
 catch {
     $installFailure = $_
     try {
+        if ([IO.File]::Exists($previousKeys)) {
+            [IO.File]::Replace($previousKeys, $keysPath, (Join-Path $staging 'keys.rejected.json'))
+        }
         if ([IO.File]::Exists($previousLayout)) {
             [IO.File]::Replace($previousLayout, $layoutPath, (Join-Path $staging 'layout.rejected.json'))
         }

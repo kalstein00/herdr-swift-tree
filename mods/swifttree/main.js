@@ -1,7 +1,8 @@
 import { View, div } from "gpui-kit";
 import { Button, Editor, EditorState, h_flex, Input, InputState, Scrollbar, v_flex, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
-import { appHome, checking, exec, focused, layout, nextCommand, pickFolder, props, spaces, terminals, theme } from "herdr";
+import { appHome, checking, exec, focused, layout, nextCommand, pickFolder, props, setShared, shared, spaces, terminals, theme } from "herdr";
 import { createDirectoryAccess } from "./directory-access.js";
+import { FileSearchView, searchSelectionKey } from "./file-search-view.js";
 import { readLinuxDirectory } from "./linux-directory.js";
 import { readLinuxMachineState, readLinuxWatch, reconcileLinuxWatch } from "./linux-watch.js";
 import { ancestorDirectoryIds, isOpenTreeFolder, makeEntry, openedTreeFolders, releaseEntry, retainEntry, setFolderListing, setFolderOpen } from "./tree-folders.js";
@@ -68,6 +69,13 @@ function choiceKey(space) {
   return space ? JSON.stringify(["swifttree-root", space.machine ?? null, space.id]) : null;
 }
 
+function resolveRoot(space, chosenFolder) {
+  const terminal = terminalLocation();
+  const folder = terminal?.folder || space?.folder || chosenFolder;
+  const machine = terminal ? terminal.machine : space?.machine ?? null;
+  return { terminal, folder, machine, key: folder ? JSON.stringify([choiceKey(space), machine, folder]) : null };
+}
+
 function readDirectory(machine, folder, reason, access, ancestors) {
   return machine
     ? readLinuxDirectory(exec, appHome(), folder, machine, access, ancestors)
@@ -77,6 +85,15 @@ function readDirectory(machine, folder, reason, access, ancestors) {
 export default class SwiftTree extends View {
   init(viewProps, cx) {
     const config = props() ?? viewProps;
+    if (config?.overlay && !checking()) {
+      this.fileSearch = new FileSearchView(config.overlay, () => {
+        const space = activeSpace();
+        const storageKey = choiceKey(space);
+        const root = resolveRoot(space, storageKey && localStorage.getItem(storageKey));
+        return root.key ? root : null;
+      }, cx);
+      return;
+    }
     this.previewWarmup = config?.role === "preview-warmup";
     if (this.previewWarmup) {
       if (!checking()) cx.spawn(warmWindowsPreview);
@@ -109,6 +126,8 @@ export default class SwiftTree extends View {
   }
 
   close() {
+    this.fileSearch?.close();
+    this.directoryAccess?.close();
     this.windowsPreview?.close();
   }
 
@@ -128,10 +147,7 @@ export default class SwiftTree extends View {
       } : null;
     }
 
-    const terminal = terminalLocation();
-    const folder = terminal?.folder || space?.folder || this.scope?.folder;
-    const machine = terminal ? terminal.machine : space?.machine ?? null;
-    const key = folder ? JSON.stringify([storageKey, machine, folder]) : null;
+    const { terminal, folder, machine, key } = resolveRoot(space, this.scope?.folder);
     if (this.rootKey === key) return;
 
     this.stopWindowsWatches();
@@ -693,8 +709,23 @@ export default class SwiftTree extends View {
   }
 
   render(cx) {
+    if (this.fileSearch) return this.fileSearch.render(cx);
     if (this.previewWarmup) return div();
     this.syncRoot(cx);
+    const selection = shared(searchSelectionKey);
+    if (selection && !this.searchSelectionPending) {
+      this.searchSelectionPending = true;
+      cx.timer.after(0, cx => {
+        this.searchSelectionPending = false;
+        this.syncRoot(cx);
+        const pending = shared(searchSelectionKey);
+        if (!pending) return;
+        setShared(searchSelectionKey, null);
+        if (!this.root || pending.root !== this.rootKey) return;
+        this.openFile(pending, cx);
+        cx.notify();
+      });
+    }
     const colors = theme();
     const root = this.root;
     const rows = treeRows(root);

@@ -246,3 +246,9 @@ uv run --isolated --python 3.13 --with opencv-python --with numpy --with windows
 2. 같은 창과 열린 폴더를 유지한 채 생성·삭제·이름 변경을 각 25회 수행한다. Windows에서 원격 작업의 요청 전과 성공 응답 후 QPC 시각을 기록해 작업 성공 범위를 얻는다. 결과가 처음 나타난 네이티브 프레임으로 각 p95의 상한을 구하고 1초 이하인지 확인한다. 이름 변경에는 이전 이름 소멸과 새 이름 출현이 모두 필요하다. [측정 방식](remote-watch-feasibility.md#같은-구성에서-유휴와-단일-변경-측정)
 3. 외부에서 파일을 열린 폴더 사이로 이동한다. 기존 위치에서 사라지고 대상에 한 번만 표시되는지 확인한다.
 4. 격리된 게스트에서 해당 합성 루트에 대한 SwiftTree의 원격 메타데이터 요청을 중단한 직후 열린 두 폴더를 변경한다. **Live updates unavailable**이 표시되는 프레임과 감시 복귀 후 프레임을 캡처한다. 별도로 읽은 게스트 목록과 복귀한 화면의 열린 폴더를 대조한다.
+
+## Windows 파일 이름 검색 검증
+
+1600×1025 격리 창에서 로컬 NTFS 탐색 루트의 Alpha와 Bravo 폴더에 각각 tree-rows.js를 둔다. 본문은 각각 ALPHA PREVIEW PROOF와 BRAVO PREVIEW PROOF다. 같은 루트의 build에는 ScopeBuild.txt를, .git에는 ScopeGit.txt를 둔다. 루트 밖 ScopeLink.txt가 든 폴더를 junction으로 연결한다. 두 번째 루트에는 ScopeAlternate.txt를 둔다.
+
+SwiftTree를 설치한 뒤 원래 루트의 터미널을 포커스하고, PowerShell 7에서 검증 창 PID와 캡처 폴더를 windows-file-search.ps1에 넘긴다. AlternateRoot는 두 번째 루트의 절대 경로다. 테스트는 Win32 키·마우스 입력으로 Ctrl+P, 파일명 입력, 선택과 취소를 수행하고 Herdr 캡처와 터미널 출력으로 결과를 확인한다.
