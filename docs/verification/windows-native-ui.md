@@ -1,10 +1,12 @@
 # Windows Herdr UI 검증
 
-[검증 경로 확인 #2](https://github.com/kalstein00/herdr-swift-tree/issues/2)에서 합의한 Windows 네이티브 검증 도구는 Windows Computer Use다. Windows Herdr 창을 대상으로 클릭, 스크롤, 키보드 입력을 보낸다. 기본 Files에서 클릭과 스크롤을 검증하고 같은 창의 명령 팔레트에서 키보드 선택 이동을 검증한다. SwiftTree의 트리 키보드 동작은 해당 SwiftTree 후보에서 검증한다.
+실행 중인 Windows Herdr에서 `herdr-app shot`으로 화면을 캡처하고 `status`와 `ls`로 앱 상태를 확인한다. `herdr-app do`에 같은 동작이 있으면 검증 창의 레이아웃, space, pane, 패널을 CLI에서 조작한다. 실제 클릭, 스크롤, 키 바인딩이나 Windows 폴더 선택기를 검증할 때는 Windows Computer Use로 해당 입력을 보낸다. 화면에 변화가 처음 나타난 시각을 측정하는 검증에는 Windows Graphics Capture를 쓴다. [Herdr CLI 조사와 Windows 재현](../research/herdr-screen-inspection.md)
+
+UI TDD에서는 위 경로로 실제 창의 검증 가능 여부를 먼저 확인한다. 회귀 E2E는 같은 동작과 화면 단언으로 수정 전 RED와 수정 후 GREEN을 확인한다. 최종 후보에서도 사용자 경로를 다시 실행하고 캡처한 PNG를 열어 결과를 확인한다.
 
 ## 격리된 검증 창 준비
 
-Windows에 설치된 Herdr에서 PowerShell로 다음을 실행한다. Herdr가 다른 위치에 설치되어 있으면 `$app`을 설치된 실행 파일 경로로 지정한다. 이후 명령에도 새 프로필과 코어 설정이 적용되도록 같은 PowerShell 세션을 사용한다.
+재현용 창을 준비하려면 저장소 루트에서 PowerShell로 다음을 실행한다. Herdr가 다른 위치에 설치되어 있으면 `$app`을 설치된 실행 파일 경로로 지정한다. 이후 명령에도 새 프로필과 코어 설정이 적용되도록 같은 PowerShell 세션을 사용한다. 기존 창이나 프로필 상태가 검증 대상이면 해당 창의 앱 홈과 코어 세션을 지정한다.
 
 ```powershell
 $app = Join-Path $env:LOCALAPPDATA 'Programs\herdr-app\herdr-app.exe'
@@ -13,6 +15,7 @@ $scratch = Join-Path ([System.IO.Path]::GetTempPath()) "st-ui-$runId"
 $tree = Join-Path $scratch 'synthetic-tree'
 $branch = Join-Path $tree 'alpha\branch'
 New-Item -ItemType Directory -Path $branch -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $tree 'Proof.txt') -Value 'SwiftTree capture fixture'
 foreach ($row in 1..75) {
     $name = 'row-{0:D3}.txt' -f $row
     Set-Content -LiteralPath (Join-Path $branch $name) -Value 'SwiftTree synthetic UI fixture'
@@ -24,21 +27,80 @@ $env:XDG_CONFIG_HOME = Join-Path $scratch 'config'
 $env:XDG_STATE_HOME = Join-Path $scratch 'state'
 $env:HC_SOCKET = $null
 
-& $app --version
+& $app --version | Out-Host
 $windowProcess = Start-Process -FilePath $app -WorkingDirectory $tree -WindowStyle Normal -PassThru
 $windowProcess.Id
 ```
 
-새 창에 Herdr 환영 화면이 표시될 때까지 기다린다. 다음 명령으로 합성 폴더를 space에 연결한다. `ls`에서 `SwiftTree UI fixture`가 활성 space이고 `folder`가 생성한 합성 폴더인지 확인한다. 레이아웃을 사용할 수 없다는 메시지가 나오면 로컬 코어 연결을 확인한 뒤 `space.new`를 다시 시도한다.
+새 창의 **Welcome to Herdr** 화면은 우측 상단의 **×**로 한 번 건너뛴다. Herdr 0.1.18에서는 이 버튼이 환영 화면을 건너뛴 상태를 저장한다. `overlay.close` 명령으로 닫으면 다음 렌더링에 화면이 다시 열릴 수 있다. [Herdr 환영 화면 구현](https://github.com/herdrdev/herdr-app/blob/v0.1.18/defaults/frame/welcome/main.js#L496-L524)
+
+PowerShell에서 Herdr의 JSON 응답을 파이프로 읽으면 명령이 끝난 뒤 종료 코드를 확인할 수 있다. 다음 명령으로 합성 폴더를 space에 연결하고 생성한 space와 활성 폴더를 확인한다. 레이아웃을 사용할 수 없다는 메시지가 나오면 로컬 코어 연결을 확인한 뒤 `space.new`를 다시 시도한다.
 
 ```powershell
-& $app do space.new --name 'SwiftTree UI fixture' --folder $tree
-& $app ls
+function Invoke-HerdrJson([string[]]$HerdrArgs) {
+    $response = & $app @HerdrArgs | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        throw "Herdr $($HerdrArgs -join ' ') failed (exit $LASTEXITCODE). $response"
+    }
+    $response | ConvertFrom-Json -ErrorAction Stop
+}
+
+$initialStatus = Invoke-HerdrJson @('status')
+if ($initialStatus.overlays -contains 'frame-welcome') {
+    throw 'Dismiss Welcome to Herdr from the fixture window before continuing.'
+}
+$created = Invoke-HerdrJson @('do', 'space.new', '--name', 'SwiftTree UI fixture', '--folder', $tree)
+$active = (Invoke-HerdrJson @('ls')).spaces | Where-Object active
+if (!$created.space -or $active.id -ne $created.space -or $active.folder -ne $tree) {
+    throw 'The fixture space is not active.'
+}
 ```
 
-Computer Use에서 실행한 프로세스의 창을 선택한다. 기존 Herdr 창도 열려 있으면 프로세스의 `MainWindowHandle`을 확인하고 목록에 반환된 창 ID와 대조한다. 클릭 위치와 포커스는 각 동작 직전의 화면으로 확인한다.
+## CLI로 화면 검증
 
-## 사용자 경로와 관측 기준
+SwiftTree를 검증할 때는 같은 앱 홈에 현재 체크아웃의 후보를 설치한다. 기본 Files 동작을 검증할 때는 기본 레이아웃으로 진행한다. 아래 예제는 설치한 모듈을 확인하고 패널을 연 다음, 활성 레이아웃과 오류 상태를 확인해 캡처한다.
+
+```powershell
+& .\scripts\install-swifttree.ps1 -HerdrApp $app -AppHome $env:HERDR_APP_HOME
+$installed = Join-Path $env:HERDR_APP_HOME 'mods/swifttree/main.js'
+if ((Get-FileHash -LiteralPath $installed -ErrorAction Stop).Hash -ne
+    (Get-FileHash -LiteralPath 'mods/swifttree/main.js' -ErrorAction Stop).Hash) {
+    throw 'The installed SwiftTree module does not match the checkout.'
+}
+
+$shown = Invoke-HerdrJson @('do', 'layout.show', '--id', 'panel')
+if (!$shown.ok) { throw 'Herdr did not show the panel.' }
+$selected = Invoke-HerdrJson @('do', 'layout.select', '--stack', 'panel-body', '--child', 'files')
+if (!$selected.ok) { throw 'Herdr did not select Files.' }
+
+$status = Invoke-HerdrJson @('status')
+if ($status.layout -ne 'swifttree' -or $status.space -ne $created.space -or
+    $status.errors.Count -gt 0 -or $status.overlays.Count -gt 0) {
+    $status | ConvertTo-Json -Depth 8 | Write-Host
+    throw 'The fixture is not showing an error-free SwiftTree layout.'
+}
+
+function Save-HerdrFrame {
+    $path = Join-Path $scratch ('files-{0}.png' -f [guid]::NewGuid())
+    $capture = Start-Process -FilePath $app -ArgumentList 'shot', ('"{0}"' -f $path) -WindowStyle Hidden -Wait -PassThru
+    if ($capture.ExitCode -ne 0 -or !(Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Herdr capture failed (exit $($capture.ExitCode))."
+    }
+    $path
+}
+$shot = Save-HerdrFrame
+Get-Item -LiteralPath $shot
+```
+
+PNG를 열어 **SwiftTree** 제목과 합성 파일 **Proof.txt**가 같은 패널에 표시되는지 확인한다. 목록이 로딩 중이면 제한 시간 안에서 `$shot = Save-HerdrFrame`을 다시 실행해 기대 상태를 확인한다. 텍스트를 자동 확인할 때는 아래의 OCR 검사에 패널 또는 행 영역을 넘긴다. 터미널 경로 동기화 검증에는 `hc get <terminal> --json`의 `foreground.cwd` 또는 `hc read`로 확인한 현재 프롬프트를 사용한다. 같은 프레임의 패널 제목과 해당 경로에만 있는 파일을 대조한다. `hc get`의 최상위 `cwd`는 터미널 시작 경로다.
+
+검증 기록에는 저장소 후보, Herdr App과 core 버전, OS 빌드, 창 크기, 명령이나 조작 순서, 기대 결과와 관측 결과, 이미지 보관 위치를 남긴다.
+
+Windows 빌드 26300의 새 프로필에서 Herdr App 0.1.18, core 0.1.22로 위 절차를 실행했다. `layout.show`와 `layout.select`가 차례로 성공했고 `status`에서 `swifttree` 레이아웃과 오류·오버레이 0건을 확인했다. 1600×1025 캡처를 열어 `SwiftTree`와 `Proof.txt`를 확인했고 OCR 검사도 통과했다.
+
+## 실제 입력을 검증하는 경우
+
+Computer Use에서 격리된 창을 선택한다. 기존 Herdr 창도 열려 있으면 검증 프로세스의 `MainWindowHandle`을 확인하고 목록에 반환된 창 ID와 대조한다. 클릭 위치와 포커스는 각 동작 직전의 화면으로 확인한다. 아래 경로는 [검증 경로 확인 #2](https://github.com/kalstein00/herdr-swift-tree/issues/2)에서 기본 Files와 명령 팔레트의 입력을 확인할 때 사용했다. SwiftTree의 입력은 해당 후보에서 검증한다.
 
 | 동작 | 화면에서 확인할 결과 |
 | --- | --- |
@@ -47,7 +109,7 @@ Computer Use에서 실행한 프로세스의 창을 선택한다. 기존 Herdr �
 | Files 목록 안에서 아래로 스크롤한다. | 보이는 목록 범위가 바뀌고 끝에서 `row-075.txt`가 나타난다. |
 | `Ctrl+Shift+P`로 명령 팔레트를 열고 `↓`를 누른다. | 팔레트 선택이 `New tab`에서 `Go to space or tab...`으로 이동한다. |
 
-접힌 목록, 펼친 목록, 마지막 행, 팔레트 선택을 캡처하고 각각 직접 열어 행 이름, 펼침 상태, 포커스와 배치를 검사한다. 기본 Files 행 위의 하이라이트는 포인터 호버 상태로 기록한다. 검증 기록에 저장소 후보, Herdr App과 core 버전, OS 빌드, 창 크기, 조작 순서, 관측 결과, 이미지 보관 위치를 남긴다.
+접힌 목록, 펼친 목록, 마지막 행, 팔레트 선택을 캡처하고 각각 직접 열어 행 이름, 펼침 상태, 포커스와 배치를 검사한다. 기본 Files 행 위의 하이라이트는 포인터 호버 상태로 기록한다.
 
 ## #2 결과
 
