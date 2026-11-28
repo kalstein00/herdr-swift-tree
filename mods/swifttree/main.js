@@ -545,6 +545,14 @@ export default class SwiftTree extends View {
     });
   }
 
+  closePreview(cx) {
+    this.previewRequest = null;
+    this.preview = null;
+    this.lastPreview = null;
+    this.focus.focus();
+    cx.notify();
+  }
+
   currentEntry(root, row) {
     const entry = row?.entry;
     if (entry && this.root === root && entry.parent.listing === row.listing && isOpenTreeFolder(entry.parent, root)) {
@@ -631,7 +639,10 @@ export default class SwiftTree extends View {
     return v_flex().flex_1().min_h(0).w_full().border_t(1).border_color(colors.border)
       .child(h_flex().h(32).flex_none().px(10).gap(8).items_center().border_b(1).border_color(colors.border)
         .child(div().flex_1().min_w(0).truncate().font_medium().text_color(colors.foreground).child(preview.name))
-        .child(div().flex_none().text_color(colors.muted).child("Read-only")))
+        .child(div().flex_none().text_color(colors.muted).child("Read-only"))
+        .child(Button.new("close-preview").size(24).flex_none().justify_center().items_center().rounded(5)
+          .text_size(16).text_color(colors.muted).hover(style => style.bg(colors.hover))
+          .on_click((_event, cx) => this.closePreview(cx)).child("×")))
       .child(content);
   }
 

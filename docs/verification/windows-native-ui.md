@@ -168,6 +168,18 @@ NTFS와 SSH마다 내용이 다른 파일 A·B와 스크롤할 수 있는 합성
 
 패널에서 본문 글자가 작아 OCR이 어긋나면 본문을 좁게 잘라 `--scale 3`으로 검사한다. 파일 선택과 읽기 전용 표시가 함께 보이는 화면은 별도로 직접 연다.
 
+### 파일 미리보기 닫기 검증
+
+NTFS와 SSH에 `alpha.js`, `binary.bin`, `bravo.txt`, `empty.txt`, `missing.txt`가 보이는 합성 루트를 만든다. `alpha.js`는 `const previewLine001 = "ALPHA 001";`부터 줄 번호가 서로 다른 160줄로 만들고 `bravo.txt`에는 `BRAVO PROOF`를 쓴다. `binary.bin`에는 NUL을 포함한다. `missing.txt`는 트리에 보이는 상태에서 본문 읽기만 실패하도록 설정한다.
+
+1. 격리된 실제 창에서 첫 행 `alpha.js`를 클릭한 뒤 포인터를 미리보기 제목 줄 오른쪽으로 옮기고 `herdr-app shot`으로 `opened.png`를 저장한다. 그 위치의 **×**를 클릭하고 `closed.png`를 저장한다. 수정 전 후보에서도 같은 위치를 클릭한다. 기본 1600×1025 프레임의 닫기 위치는 `(1563, 574)`다. 다른 크기에서는 화면에서 위치를 다시 확인한다.
+2. 기본 1600×1025 프레임에서는 아래 명령으로 미리보기가 닫혔고 첫 행에 선택이 남았는지 확인한다. `Enter`로 다시 열고, 닫은 뒤 클릭으로도 다시 연다. 긴 본문을 휠로 스크롤하고 **×**로 닫아 본다. 방향키로 `bravo.txt`를 선택한 직후에는 `alpha.js`가 보이고 `Enter`를 누른 뒤에만 본문이 바뀌어야 한다.
+3. 빈 파일, 읽기 실패, 표시할 수 없는 파일에서도 각각 **×**로 닫는다. 위의 방법으로 `alpha.js` 읽기를 지연시켜 로딩 중에 닫는다. 지연을 풀고 본문 읽기 완료를 관측한 뒤에도 미리보기가 닫혀 있어야 한다. 다시 지연시켜 닫고 `bravo.txt`를 연 뒤, `alpha.js` 읽기가 완료돼도 `bravo.txt`의 제목, 본문과 선택이 유지되는지 확인한다.
+
+```powershell
+uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --with winrt-Windows.Graphics.Imaging --with winrt-Windows.Storage --with winrt-Windows.Storage.Streams python -B tests/assert_herdr_preview_close.py opened.png closed.png
+```
+
 ## Windows 외부 변경 감시 검증
 
 격리된 NTFS 합성 루트를 Git 저장소로 초기화하고 `Left`, `Right`, `Burst`를 만든다. 격리된 Herdr 프로세스를 시작하기 전에 쓰기 가능한 별도 절대 경로를 환경 변수 `SWIFTTREE_WINDOWS_TRACE`에 넣는다. 기록에서 `watch/ready`를 확인하고 실제 Files의 `Left`와 `Right`를 펼친다.
