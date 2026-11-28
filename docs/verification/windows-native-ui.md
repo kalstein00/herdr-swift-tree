@@ -180,6 +180,19 @@ NTFS와 SSH에 `alpha.js`, `binary.bin`, `bravo.txt`, `empty.txt`, `missing.txt`
 uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --with winrt-Windows.Graphics.Imaging --with winrt-Windows.Storage --with winrt-Windows.Storage.Streams python -B tests/assert_herdr_preview_close.py opened.png closed.png
 ```
 
+### 확대 미리보기 검증
+
+같은 NTFS와 SSH 합성 루트에 Herdr가 언어를 식별할 수 없는 확장자의 텍스트 파일을 추가한다. 기존 `alpha.js`는 구문 강조와 줄 번호를 확인하는 데 사용한다. `example.ts`, `.ts`, `.bashrc`, `example.js.erb`로 기본 Files의 언어 별칭과 Herdr가 인식하는 파일명·복합 확장자도 확인한다.
+
+1. `alpha.js`를 열고 방향키로 `bravo.txt`를 선택한 뒤 아래쪽 본문을 휠로 스크롤한다. `inline.png`를 저장하고 제목 줄의 **크게 보기**를 누른다. 기본 1600×1025 프레임에서 클릭 위치는 `(1500, 574)`다. `expanded.png`에 `alpha.js`의 제목과 1번 줄이 나오며 키워드와 문자열에 구문 강조가 적용돼야 한다. 파일 읽기를 관측할 수 있으면 같은 파일을 다시 열 때의 양성 대조와 비교한다.
+2. 확대 화면에서 첫 줄을 선택해 복사하고 클립보드의 전체 문장을 비교한다. 타이핑과 붙여넣기를 한 뒤 같은 문장을 다시 복사하고 원본 파일도 비교한다. 알 수 없는 확장자의 파일을 같은 방법으로 열어 일반 텍스트가 줄 번호와 함께 표시되는지 확인한다.
+3. 확대 화면에서 스크롤한 뒤 `Esc`로 닫고 `returned.png`를 찍는다. 아래 명령으로 아래쪽에서 보던 줄이 유지됐는지 확인한다. 다시 확대하면 1번 줄에서 시작해야 한다. 다시 스크롤한 뒤 중앙의 **×**로 닫아서 같은 확인을 반복한다. 이어서 아래쪽 **×**가 아래 미리보기만 닫는지 확인한다.
+4. 로딩, 빈 파일, 읽기 실패, 표시 불가 상태에는 아래쪽 **×**만 보여야 한다. Files 패널을 좁힌 상태에서 두 버튼이 겹치거나 잘리지 않는지 보고 각각 눌러 확인한다.
+
+```powershell
+uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --with winrt-Windows.Graphics.Imaging --with winrt-Windows.Storage --with winrt-Windows.Storage.Streams python -B tests/assert_herdr_preview_expand.py inline.png expanded.png --restored returned.png
+```
+
 ## Windows 외부 변경 감시 검증
 
 격리된 NTFS 합성 루트를 Git 저장소로 초기화하고 `Left`, `Right`, `Burst`를 만든다. 격리된 Herdr 프로세스를 시작하기 전에 쓰기 가능한 별도 절대 경로를 환경 변수 `SWIFTTREE_WINDOWS_TRACE`에 넣는다. 기록에서 `watch/ready`를 확인하고 실제 Files의 `Left`와 `Right`를 펼친다.

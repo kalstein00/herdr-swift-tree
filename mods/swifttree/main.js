@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { Button, Editor, EditorState, h_flex, Input, InputState, Scrollbar, v_flex, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
-import { appHome, checking, exec, focused, layout, nextCommand, pickFolder, readTextFile, spaces, terminals, theme } from "herdr";
+import { appHome, checking, closeOverlay, exec, focused, layout, nextCommand, openOverlay, pickFolder, props, readTextFile, spaces, terminals, theme } from "herdr";
 import { createDirectoryAccess } from "./directory-access.js";
 import { readLinuxDirectory } from "./linux-directory.js";
 import { readLinuxMachineState, readLinuxWatch, reconcileLinuxWatch } from "./linux-watch.js";
@@ -20,6 +20,38 @@ const messages = {
   cycle: "순환 링크",
 };
 const rowHeight = 28;
+
+// Match Herdr Files aliases for extensions with no grammar of their own.
+const previewLanguageAliases = new Map([
+  ["ts", "js"], ["tsx", "js"], ["mts", "js"], ["cts", "js"], ["jsx", "js"], ["mjs", "js"],
+  ["toml", "yaml"], ["jsonc", "json"], ["svelte", "html"], ["vue", "html"],
+]);
+
+// The native editor accepts one syntax token, including these compound extensions.
+const compoundSyntaxTokens = new Set([
+  "css.erb", "css.liquid", "html.erb", "js.erb", "sql.erb", "pxd.in", "pxi.in", "pyx.in", "ruby.rail",
+]);
+
+const syntaxFilenames = new Set([
+  ".bash_aliases", ".bash_completions", ".bash_functions", ".bash_login", ".bash_logout",
+  ".bash_profile", ".bash_variables", ".bashrc", ".profile", ".textmate_init", "config.ru",
+]);
+
+function previewLanguage(name) {
+  const filename = name.toLowerCase();
+  const lastDot = filename.lastIndexOf(".");
+  if (lastDot < 0 || syntaxFilenames.has(filename)) return filename;
+  const compound = filename.slice(filename.lastIndexOf(".", lastDot - 1) + 1);
+  if (compoundSyntaxTokens.has(compound)) return compound;
+  const extension = filename.slice(lastDot + 1);
+  return previewLanguageAliases.get(extension) ?? extension;
+}
+
+function previewCloseButton(id, colors, onClick) {
+  return Button.new(id).size(24).flex_none().justify_center().items_center().rounded(5)
+    .text_size(16).text_color(colors.muted).hover(style => style.bg(colors.hover))
+    .on_click(onClick).child("×");
+}
 
 function activeSpace() {
   return spaces().find(space => space.active);
@@ -68,7 +100,28 @@ function readDirectory(machine, folder, reason, access, ancestors) {
 }
 
 export default class SwiftTree extends View {
-  init(_props, cx) {
+  init(viewProps, cx) {
+    const config = props() ?? viewProps;
+    if (config?.overlay && config.role === "expanded-preview") {
+      const colors = theme();
+      this.expandedPreview = {
+        name: config.name,
+        overlay: config.overlay,
+        editor: EditorState.new({
+          value: config.content,
+          language: previewLanguage(config.name),
+          readonly: true,
+          line_numbers: true,
+          folding: false,
+          soft_wrap: true,
+          syntax: {
+            keyword: colors.ansi5, string: colors.ansi2, comment: colors.dim, function: colors.ansi4,
+            type: colors.ansi3, number: colors.ansi1, constant: colors.ansi6,
+          },
+        }),
+      };
+      return;
+    }
     this.focus = cx.focus_handle();
     this.scroll = VirtualListScrollHandle.new();
     this.scope = null;
@@ -92,6 +145,10 @@ export default class SwiftTree extends View {
         }
       });
     }
+  }
+
+  close() {
+    this.expandedPreview?.editor.release();
   }
 
   syncRoot(cx) {
@@ -553,6 +610,18 @@ export default class SwiftTree extends View {
     cx.notify();
   }
 
+  openExpandedPreview(preview) {
+    if (this.preview !== preview || preview.status !== null) return;
+    openOverlay({
+      mod: "swifttree",
+      kind: "dialog",
+      modal: true,
+      width: 0.8,
+      height: 0.78,
+      props: { role: "expanded-preview", name: preview.name, content: this.previewEditor.value() },
+    });
+  }
+
   currentEntry(root, row) {
     const entry = row?.entry;
     if (entry && this.root === root && entry.parent.listing === row.listing && isOpenTreeFolder(entry.parent, root)) {
@@ -640,13 +709,26 @@ export default class SwiftTree extends View {
       .child(h_flex().h(32).flex_none().px(10).gap(8).items_center().border_b(1).border_color(colors.border)
         .child(div().flex_1().min_w(0).truncate().font_medium().text_color(colors.foreground).child(preview.name))
         .child(div().flex_none().text_color(colors.muted).child("Read-only"))
-        .child(Button.new("close-preview").size(24).flex_none().justify_center().items_center().rounded(5)
-          .text_size(16).text_color(colors.muted).hover(style => style.bg(colors.hover))
-          .on_click((_event, cx) => this.closePreview(cx)).child("×")))
+        .when(preview.status === null, header => header.child(
+          Button.new("expand-preview").h(24).px(8).flex_none().items_center().rounded(5)
+            .border_1().border_color(colors.border).text_color(colors.foreground).text_size(12)
+            .hover(style => style.bg(colors.hover)).on_click(() => this.openExpandedPreview(preview)).child("크게 보기")))
+        .child(previewCloseButton("close-preview", colors, (_event, cx) => this.closePreview(cx))))
       .child(content);
   }
 
+  renderExpandedPreview(colors) {
+    const { name, overlay, editor } = this.expandedPreview;
+    return v_flex().size_full().min_h(0).bg(colors.popover).text_size(13)
+      .child(h_flex().h(40).flex_none().px(12).gap(10).items_center().border_b(1).border_color(colors.border)
+        .child(div().flex_1().min_w(0).truncate().font_semibold().text_color(colors.foreground).child(name))
+        .child(div().flex_none().text_color(colors.muted).child("Read-only"))
+        .child(previewCloseButton("close-expanded-preview", colors, () => closeOverlay(overlay))))
+      .child(Editor.new(editor).flex_1().min_h(0).w_full());
+  }
+
   render(cx) {
+    if (this.expandedPreview) return this.renderExpandedPreview(theme());
     this.syncRoot(cx);
     const colors = theme();
     const root = this.root;
