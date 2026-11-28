@@ -1,7 +1,7 @@
 import { exec } from "herdr";
 import { connectWindowsService, readWindowsMessages } from "./windows-watch-connection.js";
 
-async function resolveCorePid() {
+export async function resolveCorePid() {
   try {
     const { code, stdout } = await exec("hc", ["server", "status", "--json"], { timeout: 1500 });
     if (code === 0) {

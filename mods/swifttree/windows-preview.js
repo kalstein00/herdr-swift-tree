@@ -1,5 +1,6 @@
 import { connectWindowsService, readWindowsMessages } from "./windows-watch-connection.js";
 import { appHome, exec } from "herdr";
+import { resolveCorePid } from "./directory-access.js";
 import { windowsHelperPath } from "./windows-directory.js";
 
 export async function warmWindowsPreview(cx) {
@@ -71,12 +72,14 @@ export function createWindowsPreview(cx) {
 
   start();
   return {
-    read(path) {
-      return request({ action: "read", path });
+    async read(path, machine) {
+      const corePid = machine ? await resolveCorePid() : null;
+      const result = await request({ action: "read", path, machine, corePid });
+      return result && { ...result, corePid };
     },
     open(file, current) {
       return request({ action: "open", name: file.name, path: file.path, version: file.version,
-        prefixHash: file.prefixHash }, current);
+        prefixHash: file.prefixHash, machine: file.machine, corePid: file.corePid }, current);
     },
     hide() {
       if (startup) void send({ action: "hide" });

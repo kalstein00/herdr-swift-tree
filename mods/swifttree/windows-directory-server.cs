@@ -43,13 +43,25 @@ internal static class SwiftTreeWindowsDirectoryServer
                     {
                         listing = request.machine == null
                             ? ReadLocal(request)
-                            : core.List(request.machine, request.script, request.folder, request.ancestors);
+                            : ReadRemote(request, core);
                     }
                     catch (Exception) { }
                     send(SwiftTreeWindowsLocalService.WireMessage(new { id = request.id, listing = listing }));
                 });
             }
         }
+    }
+
+    private static object ReadRemote(Request request, SwiftTreeWindowsCoreBridge core)
+    {
+        var result = core.Execute(request.machine,
+            new[] { "sh", "-c", request.script, "swifttree", request.folder, request.ancestors ?? "" }, 30);
+        if (result == null || result.timed_out || result.truncated) return null;
+        if (result.code == 43) return new { status = "denied" };
+        if (result.code == 44) return new { status = "missing" };
+        if (result.code == 45) return new { status = "cycle" };
+        if (result.code != 0 || result.stdout == null) return null;
+        return SwiftTreeWindowsDirectory.DecodeLinuxListing(result.stdout);
     }
 
     private static object ReadLocal(Request request)

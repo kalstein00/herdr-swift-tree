@@ -32,7 +32,8 @@ $architecture = switch ($processor) {
     x86 { 'x86' }
     default { throw 'Unknown Windows processor architecture for the WebView2 loader.' }
 }
-$previewSources = @('windows-preview-host.cs', 'windows-preview-file.cs', 'windows-preview-endpoint.cs', 'windows-local-service.cs') |
+$previewSources = @('windows-preview-host.cs', 'windows-preview-file.cs', 'linux-preview-file.cs', 'preview-text.cs',
+    'linux-preview-connection.cs', 'windows-preview-endpoint.cs', 'windows-local-service.cs', 'windows-core-bridge.cs') |
     ForEach-Object { Join-Path $source $_ }
 $previewReferences = @('System.Drawing.dll', 'System.Web.Extensions.dll', 'System.Windows.Forms.dll') |
     ForEach-Object { "/reference:$(Join-Path $framework $_)" }

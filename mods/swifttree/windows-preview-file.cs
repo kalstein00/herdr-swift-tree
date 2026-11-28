@@ -3,23 +3,17 @@ using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Win32.SafeHandles;
 
-internal sealed class SwiftTreePreviewFile : IDisposable
+internal sealed class SwiftTreePreviewFile : ISwiftTreePreviewFile
 {
-    public const int PrefixBytes = 64 * 1024;
-    public const int RangeBytes = 256 * 1024;
     private const uint LockFailImmediately = 1;
 
     private readonly FileStream stream;
     private readonly long length;
     private readonly long lockedBytes;
-    private readonly Decoder decoder = new UTF8Encoding(false, true).GetDecoder();
-    private readonly byte[] bytes = new byte[RangeBytes];
-    private readonly char[] characters = new char[RangeBytes + 2];
-    private bool atStart = true;
+    private readonly SwiftTreePreviewText text = new SwiftTreePreviewText();
+    private readonly byte[] bytes = new byte[SwiftTreePreviewText.RangeBytes];
 
     public SwiftTreePreviewFile(string path, long maximumLockedBytes = Int64.MaxValue)
     {
@@ -54,15 +48,10 @@ internal sealed class SwiftTreePreviewFile : IDisposable
             count += read;
         }
 
-        int decoded = decoder.GetChars(bytes, 0, count, characters, 0, AtEnd);
-        if (Array.IndexOf(characters, '\0', 0, decoded) >= 0)
-            throw new InvalidDataException("File contains a NUL character.");
-        int start = atStart && decoded > 0 && characters[0] == '\uFEFF' ? 1 : 0;
-        atStart = false;
-        return new string(characters, start, decoded - start);
+        return text.Decode(bytes, 0, count, AtEnd);
     }
 
-    public void VerifyPath(string path)
+    public void VerifyCompletion(string path)
     {
         VerifyPath(path, Version);
     }
@@ -71,12 +60,6 @@ internal sealed class SwiftTreePreviewFile : IDisposable
     {
         using (var current = OpenRead(path))
             if (GetVersion(current.SafeFileHandle) != version) throw new IOException("Preview file changed.");
-    }
-
-    public static string Fingerprint(string prefix)
-    {
-        using (var sha = SHA256.Create())
-            return Convert.ToBase64String(sha.ComputeHash(Encoding.UTF8.GetBytes(prefix)));
     }
 
     private static FileStream OpenRead(string path)

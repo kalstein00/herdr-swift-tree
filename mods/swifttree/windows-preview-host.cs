@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
@@ -23,6 +24,7 @@ internal sealed class SwiftTreePreviewHost : Form
     private readonly TcpListener listener = new TcpListener(IPAddress.Loopback, 0);
     private readonly string tracePath = Environment.GetEnvironmentVariable("SWIFTTREE_PREVIEW_TRACE");
     private readonly object traceGate = new object();
+    private readonly Dictionary<string, SwiftTreeWindowsCoreBridge> cores = new Dictionary<string, SwiftTreeWindowsCoreBridge>();
     private readonly WebView2 web = new WebView2 { Dock = DockStyle.Fill, Visible = false };
     private readonly Label status = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
     private readonly Timer ownerTimer = new Timer { Interval = 250 };
@@ -196,14 +198,14 @@ internal sealed class SwiftTreePreviewHost : Form
     {
         try
         {
-            await Task.Run(() => SwiftTreePreviewFile.VerifyPath(request.path, request.version));
+            await Task.Run(() => VerifySource(request));
             if (revision != generation) return;
             status.Visible = false;
             web.Visible = true;
             web.Focus();
             Trace("document/begun");
         }
-        catch (Exception) { DocumentFailed(revision); }
+        catch (Exception error) { DocumentFailed(request, revision, error); }
     }
 
     private void WebViewFailed()
@@ -262,12 +264,12 @@ internal sealed class SwiftTreePreviewHost : Form
         object result = null;
         try
         {
-            using (var file = new SwiftTreePreviewFile(command.path, SwiftTreePreviewFile.PrefixBytes))
+            using (var file = OpenFile(command, true))
             {
-                string text = file.ReadRange(SwiftTreePreviewFile.PrefixBytes);
-                file.VerifyPath(command.path);
+                string text = file.ReadRange(SwiftTreePreviewText.PrefixBytes);
+                if (command.machine == null) SwiftTreePreviewFile.VerifyPath(command.path, file.Version);
                 result = new { text = text, partial = !file.AtEnd, version = file.Version,
-                               prefixHash = SwiftTreePreviewFile.Fingerprint(text) };
+                               prefixHash = SwiftTreePreviewText.Fingerprint(text) };
             }
         }
         catch (Exception error) { Trace("prefix/unavailable/" + error.GetType().Name); }
@@ -309,28 +311,29 @@ internal sealed class SwiftTreePreviewHost : Form
     {
         try
         {
-            using (var file = await Task.Run(() => new SwiftTreePreviewFile(request.path)))
+            using (var file = await Task.Run(() => OpenFile(request, false)))
             {
                 if (revision != generation) return;
                 if (file.Version != request.version) throw new IOException("Preview file changed.");
                 string text = await Task.Run(() =>
                 {
-                    string prefix = file.ReadRange(SwiftTreePreviewFile.PrefixBytes);
-                    if (SwiftTreePreviewFile.Fingerprint(prefix) != request.prefixHash)
+                    string prefix = file.ReadRange(SwiftTreePreviewText.PrefixBytes);
+                    if (SwiftTreePreviewText.Fingerprint(prefix) != request.prefixHash)
                         throw new IOException("Preview file changed.");
-                    file.VerifyPath(request.path);
+                    if (request.machine == null) SwiftTreePreviewFile.VerifyPath(request.path, file.Version);
                     return prefix;
                 });
                 if (revision != generation) return;
                 Post(new { action = "begin", id = revision, name = request.name, text = text });
                 Trace("document/prefix");
+                int rangeBytes = request.machine == null ? SwiftTreePreviewText.RangeBytes : SwiftTreeLinuxPreviewFile.RangeBytes;
                 while (!file.AtEnd)
                 {
-                    string part = await Task.Run(() => file.ReadRange(SwiftTreePreviewFile.RangeBytes));
+                    string part = await Task.Run(() => file.ReadRange(rangeBytes));
                     if (revision != generation) return;
                     Post(new { action = "append", id = revision, text = part });
                 }
-                await Task.Run(() => file.VerifyPath(request.path));
+                await Task.Run(() => file.VerifyCompletion(request.path));
                 if (revision == generation)
                 {
                     Post(new { action = "complete", id = revision });
@@ -338,14 +341,43 @@ internal sealed class SwiftTreePreviewHost : Form
                 }
             }
         }
-        catch (Exception) { DocumentFailed(revision); }
+        catch (Exception error) { DocumentFailed(request, revision, error); }
     }
 
-    private void DocumentFailed(int revision)
+    private ISwiftTreePreviewFile OpenFile(Request request, bool prefixOnly)
+    {
+        if (request.machine == null)
+            return new SwiftTreePreviewFile(request.path, prefixOnly ? SwiftTreePreviewText.PrefixBytes : Int64.MaxValue);
+        return new SwiftTreeLinuxPreviewFile(CoreFor(request.corePid), request.machine, request.path, request.version, prefixOnly);
+    }
+
+    private void VerifySource(Request request)
+    {
+        if (request.machine == null) SwiftTreePreviewFile.VerifyPath(request.path, request.version);
+        else SwiftTreeLinuxPreviewFile.VerifyPath(CoreFor(request.corePid), request.machine, request.path, request.version);
+    }
+
+    private SwiftTreeWindowsCoreBridge CoreFor(string processId)
+    {
+        lock (cores)
+        {
+            string key = processId ?? "";
+            SwiftTreeWindowsCoreBridge core;
+            if (cores.TryGetValue(key, out core)) return core;
+            core = new SwiftTreeWindowsCoreBridge(key);
+            cores.Add(key, core);
+            return core;
+        }
+    }
+
+    private void DocumentFailed(Request request, int revision, Exception error)
     {
         if (revision != generation) return;
         ++generation;
-        ShowStatus("Preview unavailable. Reopen the file to try again.");
+        string message = request.machine == null ? "Preview unavailable. Reopen the file to try again."
+            : "Could not read the remote file. Reopen it to try again.";
+        if (error is SwiftTreeLinuxPreviewException) message = error.Message;
+        ShowStatus(message);
         if (ready) Post(new { action = "clear", id = generation });
     }
 
@@ -405,6 +437,8 @@ internal sealed class SwiftTreePreviewHost : Form
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
         ownerTimer.Dispose();
+        lock (cores)
+            foreach (var core in cores.Values) core.Dispose();
         Application.ExitThread();
     }
 
@@ -450,6 +484,8 @@ internal sealed class SwiftTreePreviewHost : Form
         public string name { get; set; }
         public string version { get; set; }
         public string prefixHash { get; set; }
+        public string machine { get; set; }
+        public string corePid { get; set; }
     }
 
     [StructLayout(LayoutKind.Sequential)]

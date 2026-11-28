@@ -28,10 +28,10 @@ internal sealed class SwiftTreeWindowsCoreBridge : IDisposable
         catch (InvalidOperationException) { }
     }
 
-    public object List(string machine, string script, string folder, string ancestors)
+    public CoreResult Execute(string machine, string[] argv, int timeout, bool dedicated = false)
     {
         if (executable == null) return null;
-        slots.Wait();
+        if (!dedicated) slots.Wait();
         Connection connection = null;
         bool reusable = false;
         try
@@ -39,11 +39,11 @@ internal sealed class SwiftTreeWindowsCoreBridge : IDisposable
             lock (gate)
             {
                 if (disposed) return null;
-                connection = idle.Count == 0 ? new Connection(executable) : idle.Pop();
+                connection = dedicated || idle.Count == 0 ? new Connection(executable) : idle.Pop();
                 connections.Add(connection);
             }
-            var response = connection.List(machine, script, folder, ancestors);
-            reusable = true;
+            var response = connection.Execute(machine, argv, timeout);
+            reusable = !dedicated;
             return response;
         }
         catch (IOException) { return null; }
@@ -59,7 +59,7 @@ internal sealed class SwiftTreeWindowsCoreBridge : IDisposable
                     else if (connections.Remove(connection)) connection.Dispose();
                 }
             }
-            slots.Release();
+            if (!dedicated) slots.Release();
         }
     }
 
@@ -97,26 +97,20 @@ internal sealed class SwiftTreeWindowsCoreBridge : IDisposable
             input = new StreamWriter(process.StandardInput.BaseStream, new UTF8Encoding(false, true)) { AutoFlush = true };
         }
 
-        public object List(string machine, string script, string folder, string ancestors)
+        public CoreResult Execute(string machine, string[] argv, int timeout)
         {
-            input.WriteLine(SwiftTreeWindowsDirectory.Serialize(new
+            input.WriteLine(SwiftTreeWindowsLocalService.Json(new
             {
                 jsonrpc = "2.0",
                 id = 1,
                 method = "machine.exec",
-                @params = new { on = machine, argv = new[] { "sh", "-c", script, "swifttree", folder, ancestors ?? "" }, timeout = 30 },
+                @params = new { on = machine, argv = argv, timeout = timeout },
             }));
             var line = process.StandardOutput.ReadLine();
             if (line == null) throw new IOException("The Herdr core bridge disconnected.");
-            var reply = SwiftTreeWindowsDirectory.Deserialize<CoreReply>(line);
+            var reply = SwiftTreeWindowsLocalService.ReadJson<CoreReply>(line);
             if (reply == null || reply.id != 1) throw new IOException("Invalid Herdr core response.");
-            var result = reply.result;
-            if (result == null || result.timed_out || result.truncated) return null;
-            if (result.code == 43) return new { status = "denied" };
-            if (result.code == 44) return new { status = "missing" };
-            if (result.code == 45) return new { status = "cycle" };
-            if (result.code != 0 || result.stdout == null) return null;
-            return SwiftTreeWindowsDirectory.DecodeLinuxListing(result.stdout);
+            return reply.result;
         }
 
         public void Dispose()
@@ -140,7 +134,7 @@ internal sealed class SwiftTreeWindowsCoreBridge : IDisposable
         public CoreResult result { get; set; }
     }
 
-    private sealed class CoreResult
+    public sealed class CoreResult
     {
         public int? code { get; set; }
         public bool timed_out { get; set; }

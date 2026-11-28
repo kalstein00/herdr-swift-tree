@@ -189,13 +189,9 @@ uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --w
 3. 확대 화면에서 스크롤한 뒤 `Esc`로 닫고 `returned.png`를 찍는다. 아래쪽에서 보던 줄과 트리 선택이 유지됐는지 확인한다. 다시 확대하면 1번 줄에서 시작해야 한다. 다시 스크롤한 뒤 중앙의 **×**로 닫아서 같은 확인을 반복한다. 이어서 아래쪽 **×**가 아래 미리보기만 닫는지 확인한다.
 4. 로딩, 빈 파일, 읽기 실패, 표시 불가 상태에는 아래쪽 **×**만 보여야 한다. Files 패널을 좁힌 상태에서 두 버튼이 겹치거나 잘리지 않는지 보고 각각 눌러 확인한다.
 
-아래 명령은 SSH의 Herdr 오버레이 캡처를 비교한다. Windows 로컬 파일은 별도 확대 창이므로 Windows Graphics Capture로 확대 창을 캡처하고 `herdr-app shot`으로 아래쪽 상태를 캡처한다.
+Windows NTFS와 SSH Linux 모두 Windows Graphics Capture로 확대 창을 캡처하고 `herdr-app shot`으로 아래쪽 상태를 캡처한다. 두 닫기 방식에서 캡처한 아래쪽 본문과 선택 행을 비교한다.
 
-```powershell
-uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --with winrt-Windows.Graphics.Imaging --with winrt-Windows.Storage --with winrt-Windows.Storage.Streams python -B tests/assert_herdr_preview_expand.py inline.png expanded.png --restored returned.png
-```
-
-#### Windows 로컬 대용량 파일
+#### Windows 로컬과 SSH Linux의 대용량 파일
 
 1. 1 MiB에서 1바이트 모자란 파일, 정확히 1 MiB인 파일, 1바이트 초과한 파일, 8 MiB 파일, 32 MiB 파일을 만든다. 파일명에 0을 채운 8자리 바이트 수를 쓴다(예 `01048577.txt`). 첫 줄에는 `TOP SIZE PROOF`와 바이트 크기를, 마지막 줄에는 `END SIZE PROOF`와 바이트 크기를 넣는다. 64 KiB 경계를 UTF-8 한글 문자 중간에 둔 파일도 준비한다.
 2. 격리 Herdr에서 Files를 열고 각 파일을 클릭한다. 아래쪽의 파일명과 **Showing the start of the file**을 확인하고 `inline.png`로 저장한다. **크게 보기**를 눌러 중앙 뷰어의 첫 줄을 캡처한다. `Ctrl+End`로 끝에 가서 마지막 줄도 캡처한다. 아래 명령에서 `1048577`을 검증 파일의 바이트 크기로 바꾼다.
@@ -205,6 +201,8 @@ uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --w
 ```powershell
 uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --with winrt-Windows.Graphics.Imaging --with winrt-Windows.Storage --with winrt-Windows.Storage.Streams python -B tests/assert_herdr_large_preview.py 1048577 inline.png --expanded first.png --end last.png
 ```
+
+SSH에서는 같은 크기의 자료를 격리된 원격 탐색 루트에 복사한 뒤 위 순서를 반복한다. 별도 SSH 연결에서 파일 lease로 A의 열기를 늦추고 아래쪽 **×**를 누른 뒤 B를 연다. 원격 연결이 끊겼을 때 오류를 캡처하고 다시 연결한 뒤 같은 경로를 열어 최신 내용을 확인한다. 이미 받은 첫 부분이 표시되는 동안 32 MiB 파일을 교체하거나 메타데이터가 그대로인 매핑 쓰기를 수행하고 파일 변경 안내를 캡처한다. 범위 사이에서 SSH 연결이 교체되면 기존 요청이 중단 상태로 끝나는지 확인한다.
 
 ## Windows 외부 변경 감시 검증
 

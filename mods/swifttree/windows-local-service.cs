@@ -16,6 +16,11 @@ internal static class SwiftTreeWindowsLocalService
         return new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize(value);
     }
 
+    public static T ReadJson<T>(string value)
+    {
+        return new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Deserialize<T>(value);
+    }
+
     public static int Run(string endpoint, Action ready, Action<TcpClient, NetworkStream> serve)
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
