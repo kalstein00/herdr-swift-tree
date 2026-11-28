@@ -12,7 +12,11 @@
     "@codemirror/language-data": "6.5.2",
     "@codemirror/search": "6.7.3",
     "@codemirror/state": "6.7.6",
-    "@codemirror/view": "6.44.2"
+    "@codemirror/view": "6.44.2",
+    "cherry-markdown": "0.11.14",
+    "dompurify": "3.5.0",
+    "katex": "0.19.1",
+    "mermaid": "12.4.0"
   },
   "devDependencies": {
     "esbuild": "0.28.2"

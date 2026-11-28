@@ -9,7 +9,39 @@ body { display: flex; flex-direction: column; height: 100dvh; margin: 0; }
 header { display: flex; align-items: center; gap: 1rem; padding: 0.55rem 0.9rem; border-bottom: 1px solid GrayText; }
 #filename { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
 #state { flex: none; color: GrayText; }
-main { flex: 1; min-height: 0; }
+#views { position: relative; flex: 1; min-height: 0; }
+main { position: absolute; inset: 0; }
+[hidden] { display: none !important; }
+#view-mode { display: flex; gap: 0.25rem; }
+#view-mode button {
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+#view-mode button[aria-pressed="true"] { background: ButtonFace; border-color: GrayText; }
+#document-view { overflow: auto; contain: paint; }
+/* Mermaid measures its hidden canvases while the user reads the source. */
+#document-view[hidden] { display: block !important; visibility: hidden; opacity: 0; }
+#document-view:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
+#document-view .cherry-markdown {
+  --base-previewer-bg: Canvas;
+  --md-paragraph-color: CanvasText;
+  --md-link-color: LinkText;
+  --md-link-hover-color: LinkText;
+  --md-table-border: GrayText;
+  --md-inline-code-bg: ButtonFace;
+  max-width: 70rem;
+  margin: auto;
+  padding: 1.3rem 2rem 3rem;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+#document-view a[href^="#"] { text-decoration: underline; }
+#document-view [data-type="mermaid"] img { display: block; max-width: 100%; }
 .cm-editor { height: 100%; }
 .cm-scroller { overflow: auto; font: 14px/1.5 Consolas, monospace !important; }
 .cm-gutters { color: GrayText !important; }

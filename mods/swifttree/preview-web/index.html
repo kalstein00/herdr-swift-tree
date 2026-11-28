@@ -3,13 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src data:; base-uri 'none'; form-action 'none'">
   <title>SwiftTree expanded preview</title>
+  <link rel="stylesheet" href="./markdown-style.css">
   <link rel="stylesheet" href="./viewer.css">
   <script type="module" src="./editor.js"></script>
 </head>
 <body>
-  <header><span id="filename"></span><span id="state" role="status">Read-only</span></header>
-  <main id="editor" aria-label="File content"></main>
+  <header>
+    <span id="filename"></span>
+    <div id="view-mode" role="group" aria-label="Markdown view" hidden>
+      <button type="button" id="show-document" aria-controls="document-view" aria-pressed="true" lang="ko">문서 보기</button>
+      <button type="button" id="show-source" aria-controls="editor" aria-pressed="false" lang="ko">원문</button>
+    </div>
+    <span id="state" role="status">Read-only</span>
+  </header>
+  <div id="views">
+    <main id="editor" aria-label="File content"></main>
+    <main id="document-view" tabindex="0" aria-label="Markdown document" hidden inert></main>
+  </div>
 </body>
 </html>

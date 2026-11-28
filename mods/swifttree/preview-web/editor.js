@@ -8,6 +8,11 @@ import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 const bridge = window.chrome.webview;
 const filename = document.querySelector("#filename");
 const status = document.querySelector("#state");
+const sourceView = document.querySelector("#editor");
+const documentView = document.querySelector("#document-view");
+const viewMode = document.querySelector("#view-mode");
+const showDocument = document.querySelector("#show-document");
+const showSource = document.querySelector("#show-source");
 const language = new Compartment();
 const sourceUpdate = Annotation.define();
 const editorTheme = EditorView.theme({}, { dark: matchMedia("(prefers-color-scheme: dark)").matches });
@@ -31,8 +36,40 @@ function editorState(text) {
   });
 }
 
-const editor = new EditorView({ parent: document.querySelector("#editor"), state: editorState("") });
+const editor = new EditorView({ parent: sourceView, state: editorState("") });
 let current;
+
+function setView(showMarkdown) {
+  sourceView.hidden = showMarkdown;
+  documentView.hidden = !showMarkdown;
+  documentView.inert = !showMarkdown;
+  showDocument.setAttribute("aria-pressed", showMarkdown);
+  showSource.setAttribute("aria-pressed", !showMarkdown);
+  if (showMarkdown) documentView.focus({ preventScroll: true });
+  else editor.focus();
+}
+
+function resetDocument() {
+  documentView.replaceChildren();
+  documentView.scrollTop = 0;
+}
+
+showDocument.addEventListener("click", () => setView(true));
+showSource.addEventListener("click", () => setView(false));
+
+async function showMarkdown(request) {
+  try {
+    const { renderMarkdown } = await import("./markdown.js");
+    if (current !== request) return;
+    documentView.append(renderMarkdown(editor.state.doc.toString()));
+    status.textContent = "Read-only";
+  } catch {
+    if (current !== request) return;
+    viewMode.hidden = true;
+    setView(false);
+    status.textContent = "Document rendering unavailable";
+  }
+}
 
 async function showLanguage(name, document) {
   const basename = name.toLowerCase();
@@ -54,12 +91,20 @@ bridge.addEventListener("message", ({ data }) => {
     case "begin":
       filename.textContent = data.name;
       status.textContent = "Reading file…";
-      current = { id: data.id, prefixEndsInCR: data.text.endsWith("\r"), parts: [] };
+      current = {
+        id: data.id,
+        markdown: /\.(?:md|markdown)$/i.test(data.name),
+        prefixEndsInCR: data.text.endsWith("\r"),
+        parts: [],
+      };
+      resetDocument();
+      viewMode.hidden = !current.markdown;
+      sourceView.hidden = false;
       editor.setState(editorState(data.text));
       editor.scrollDOM.scrollTop = 0;
       editor.scrollDOM.scrollLeft = 0;
       editor.dispatch({ effects: EditorView.scrollIntoView(0, { y: "start", x: "start" }) });
-      editor.focus();
+      setView(current.markdown);
       bridge.postMessage(`begun:${data.id}`);
       void showLanguage(data.name, current);
       break;
@@ -72,13 +117,23 @@ bridge.addEventListener("message", ({ data }) => {
       current.parts.length = 0;
       if (current.prefixEndsInCR && tail.startsWith("\n")) tail = tail.slice(1);
       if (tail) editor.dispatch({ changes: { from: editor.state.doc.length, insert: tail }, annotations: sourceUpdate.of(true) });
-      status.textContent = "Read-only";
+      if (current.markdown) {
+        status.textContent = "Rendering document…";
+        void showMarkdown(current);
+      } else {
+        status.textContent = "Read-only";
+      }
       break;
     }
     case "clear":
       current = null;
       filename.textContent = "";
       status.textContent = "Read-only";
+      resetDocument();
+      documentView.hidden = true;
+      documentView.inert = true;
+      viewMode.hidden = true;
+      sourceView.hidden = false;
       editor.setState(editorState(""));
       break;
   }
