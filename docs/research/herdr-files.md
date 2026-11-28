@@ -41,9 +41,9 @@
 
 Windows 로컬과 SSH 원격 Linux 모두에서 파일을 열면 트리를 계속 표시하고 조작할 수 있는 상태로 읽기 전용 미리보기를 보여준다. 파일 본문 조회는 해당 파일을 여는 동작에서만 시작한다. 검증할 때는 폴더를 펼치고 스크롤하는 동안 본문 읽기가 0회인지 확인하고, 파일을 열면 해당 파일의 미리보기가 나타나며 트리에서 곧바로 다른 파일을 열 수 있는지 확인한다.
 
-탐색 루트는 현재 Herdr space에 지정된 폴더다. 같은 space에서 터미널이 다른 디렉터리로 이동하거나 다른 pane에 포커스가 가도 루트를 유지한다. 폴더가 지정되지 않은 space를 처음 열면 Windows 로컬과 SSH 원격 Linux 모두에서 ‘폴더 열기’를 표시한다. 빈 `space.folder`가 새 터미널의 시작 위치로 뜻하는 홈을 탐색 루트로 자동 선택하지 않는다. Herdr의 `pickFolder`는 로컬 시스템 선택기이므로 원격 폴더 선택에는 해당 머신의 경로를 다루는 방법이 필요하다. [Space API](https://github.com/herdrdev/herdr-app/blob/3e6d56448272064fd06ed95f5b7dc2cf70ea67b4/defaults/herdr.d.ts#L131-L143) · [폴더 선택기](https://github.com/herdrdev/herdr-app/blob/3e6d56448272064fd06ed95f5b7dc2cf70ea67b4/defaults/AGENTS.md#L1247-L1251)
+탐색 루트는 활성 터미널의 현재 디렉터리를 따른다. 같은 space에서 `cd`를 실행하거나 다른 터미널 pane에 포커스를 옮기면 경로를 갱신한다. 활성 터미널의 경로를 알 수 없으면 space에 지정된 폴더나 이전에 선택한 폴더를 사용한다. 사용할 경로가 없으면 ‘폴더 열기’를 표시한다. Herdr의 `pickFolder`는 로컬 시스템 선택기이므로 원격 폴더 선택에는 해당 머신의 경로를 다루는 방법이 필요하다. [포커스 API](https://github.com/herdrdev/herdr-app/blob/v0.1.18/defaults/herdr.d.ts#L249-L261) · [폴더 선택기](https://github.com/herdrdev/herdr-app/blob/3e6d56448272064fd06ed95f5b7dc2cf70ea67b4/defaults/AGENTS.md#L1247-L1251)
 
-‘폴더 열기’로 선택한 폴더는 그 머신에 있는 현재 space의 SwiftTree 탐색 루트가 된다. 다른 space에 다녀오거나 Herdr를 다시 실행해 같은 space를 열면 SwiftTree는 선택한 폴더를 복원한다. 이 선택은 파일 트리에만 적용되며, 새 터미널의 시작 폴더는 기존 Herdr 설정을 따른다.
+‘폴더 열기’로 선택한 폴더는 현재 space의 예비 탐색 루트로 저장한다. Herdr를 다시 실행해도 활성 터미널 경로와 space에 지정된 폴더가 없을 때 이 선택을 복원한다. 이 선택은 파일 트리에만 적용되며, 새 터미널의 시작 폴더는 기존 Herdr 설정을 따른다.
 
 첫 버전부터 Windows 로컬과 SSH 원격 Linux 모두에서 펼친 폴더의 모든 표시 대상 항목에 도달할 수 있어야 한다. 첫 화면에는 일부만 표시해도 된다. 같은 폴더를 펼치는 입력을 기준으로 첫 행 선택 가능 시간과 마지막 항목 도달 시간을 각각 측정한다. [측정 용어](../../GLOSSARY.md)
 

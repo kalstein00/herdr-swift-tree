@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { Button, Editor, EditorState, h_flex, Input, InputState, Scrollbar, v_flex, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
-import { appHome, checking, exec, nextCommand, pickFolder, readTextFile, spaces, theme } from "herdr";
+import { appHome, checking, exec, focused, layout, nextCommand, pickFolder, readTextFile, spaces, terminals, theme } from "herdr";
 import { createDirectoryAccess } from "./directory-access.js";
 import { readLinuxDirectory } from "./linux-directory.js";
 import { readLinuxMachineState, readLinuxWatch, reconcileLinuxWatch } from "./linux-watch.js";
@@ -23,6 +23,38 @@ const rowHeight = 28;
 
 function activeSpace() {
   return spaces().find(space => space.active);
+}
+
+function hasVisibleAgent(node) {
+  if (!node || node.hidden) return false;
+  if (node.type === "block") return node.content?.agent != null;
+  if (node.type === "stack") {
+    const visible = node.children.filter(child => !child.hidden);
+    return hasVisibleAgent(visible.find(child => child.id === node.active) ?? visible[0]);
+  }
+  return node.children?.some(hasVisibleAgent) ?? false;
+}
+
+function terminalLocation() {
+  const focus = focused();
+  if (!focus) return null;
+  // With a visible Agent block, Herdr publishes that agent's cwd for the model pane.
+  const agent = focus.pane !== null && hasVisibleAgent(layout()) ? focus.agent : null;
+  const replacement = agent ? null : focus.shown;
+  const address = agent ?? replacement ?? focus.terminal;
+  if (!address) return null;
+  let folder = focus.cwd;
+  if (replacement) {
+    // The focus snapshot's cwd belongs to the pane's own terminal.
+    const shown = terminals().find(terminal => terminal.address === address);
+    folder = shown?.foreground?.cwd || shown?.cwd;
+  }
+  if (!folder) return null;
+  const separator = address.indexOf("/");
+  return {
+    folder,
+    machine: separator < 0 ? null : address.slice(0, separator),
+  };
 }
 
 function choiceKey(space) {
@@ -65,12 +97,11 @@ export default class SwiftTree extends View {
   syncRoot(cx) {
     if (checking()) return;
     const space = activeSpace();
-    const machine = space?.machine ?? null;
     const storageKey = choiceKey(space);
     if (storageKey !== (this.scope?.storageKey ?? null)) {
       this.scope = storageKey ? {
         storageKey,
-        machine,
+        machine: space.machine ?? null,
         folder: localStorage.getItem(storageKey),
         initialListing: null,
         formOpen: false,
@@ -79,8 +110,10 @@ export default class SwiftTree extends View {
       } : null;
     }
 
-    const folder = space?.folder || this.scope?.folder;
-    const key = folder ? JSON.stringify([storageKey, folder]) : null;
+    const terminal = terminalLocation();
+    const folder = terminal?.folder || space?.folder || this.scope?.folder;
+    const machine = terminal ? terminal.machine : space?.machine ?? null;
+    const key = folder ? JSON.stringify([storageKey, machine, folder]) : null;
     if (this.rootKey === key) return;
 
     this.stopWindowsWatches();
@@ -104,12 +137,12 @@ export default class SwiftTree extends View {
     } else {
       this.syncWindowsWatches(this.root, cx);
     }
-    const initialListing = this.scope.initialListing;
-    this.scope.initialListing = null;
-    if (initialListing && folder === this.scope.folder) {
+    const initialListing = !terminal && folder === this.scope?.folder ? this.scope.initialListing : null;
+    if (this.scope) this.scope.initialListing = null;
+    if (initialListing) {
       setFolderListing(this.root, initialListing, machine ? "/" : "\\");
     }
-    if (!initialListing || folder !== this.scope.folder || !machine) {
+    if (!initialListing || !machine) {
       this.loadFolder(this.root, cx, "open");
     }
   }
@@ -393,7 +426,7 @@ export default class SwiftTree extends View {
   canChoose(scope) {
     if (!scope || this.scope !== scope || scope.folder) return false;
     const space = activeSpace();
-    return choiceKey(space) === scope.storageKey && !space.folder;
+    return choiceKey(space) === scope.storageKey && !space.folder && !terminalLocation();
   }
 
   openFolder(scope, cx) {

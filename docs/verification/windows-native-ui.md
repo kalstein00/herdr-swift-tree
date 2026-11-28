@@ -124,7 +124,7 @@ Herdr App 0.1.18의 기본 Files는 포인터 클릭으로 행을 열며, 방향
 Herdr App 0.1.18의 격리된 레이아웃에서 `scripts/install-swifttree.ps1`의 `-AppHome`에 대상 프로필을 지정한다. 홈 아래와 홈 밖 NTFS 폴더를 각각 space의 시작 폴더로 지정한다. 합성 폴더에는 숫자가 붙은 폴더·파일 이름, 파일이 든 하위 폴더, 빈 폴더, 테스트 계정의 열거 권한을 거부한 폴더, 읽기 중 삭제할 폴더를 둔다. 각 위치의 파일을 독립적으로 열거해 기대 목록을 기록한다.
 
 1. 상단 Files 버튼으로 SwiftTree를 열고 처음 보이는 행과 파일·폴더 순서를 비교한다. 폴더를 펼친 뒤 `↓`로 자식 행을 선택한다. 이름에 곡선형 아포스트로피가 있는 폴더도 펼쳐 자식 파일을 확인한다.
-2. 한 터미널에서 다른 폴더로 이동한 뒤 다른 폴더를 시작 위치로 한 pane에 포커스를 옮겨 본다. 트리에 해당 space의 원래 목록이 보이는지 확인한다.
+2. 한 터미널에서 `cd`를 실행한 뒤 다른 폴더에서 시작한 pane으로 포커스를 옮긴다. 각 단계에서 활성 터미널의 현재 경로와 SwiftTree 제목 및 고유 파일 행이 일치하는지 확인한다. 아래 CLI 회귀 테스트는 각 화면을 캡처하고 OCR로 파일 행을 확인한다.
 3. 빈 폴더, 읽기 권한이 없는 폴더, 목록을 요청한 뒤 삭제된 폴더를 열어 각각의 문구를 확인한다.
 4. `Ctrl+Shift+P`에서 `layout`을 검색하고 `Layout: Herdr`로 전환한다. Files 버튼으로 기본 패널을 닫았다가 다시 연다.
 
@@ -133,7 +133,10 @@ Herdr App 0.1.18의 격리된 레이아웃에서 `scripts/install-swifttree.ps1`
 ```powershell
 uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --with winrt-Windows.Graphics.Imaging --with winrt-Windows.Storage --with winrt-Windows.Storage.Streams python tests/assert_herdr_panel.py <capture.png> SwiftTree Folder02 alpha.txt --crop 1130 50 455 620
 node --test tests/windows-directory.test.mjs
+./tests/windows-terminal-root.ps1 -FixtureRoot $scratch -HerdrApp $app
 ```
+
+코어도 다른 위치에 설치했다면 `-HerdrCore`에 `hc.exe` 경로를 지정한다. 테스트는 만든 space를 닫고 PNG 경로를 출력한다.
 
 ## SwiftTree의 SSH Linux 탐색 검증
 
@@ -145,9 +148,11 @@ node --test tests/windows-directory.test.mjs
 
 로컬 캡처에서 원격 파일이 섞이지 않았는지 검사할 때 `tests/assert_herdr_panel.py`의 `--exclude <파일명>`을 사용한다. `node --test tests/linux-directory.test.mjs`는 원격으로 전달할 머신과 경로, Linux 목록 디코딩, Windows 정렬 및 불완전한 응답 처리를 검사한다.
 
+Agent 레이아웃도 별도로 검증한다. 격리 창에서 `swifttree` 레이아웃을 복제하고 중앙 블록의 내용을 `{ "agent": "focused" }`로 바꾼다. 로컬 space를 활성 상태로 둔 채 `hc run --on <machine> --bg --cwd <remote-folder>`로 별도 pane이 없는 SSH 터미널을 열고, `herdr-app do agent.focus --terminal <address>`로 표시한다. `hc get <address> --json`의 `foreground.cwd`와 SwiftTree 제목을 대조하고 원격 고유 파일을 캡처에서 확인한다. 같은 SSH 터미널에서 `cd`를 실행하고 새 경로와 고유 파일 행을 다시 확인한다.
+
 ## 폴더 선택과 재시작 복원 검증
 
-격리된 프로필에서 폴더가 지정되지 않은 로컬 space와 SSH space를 준비한다. 각 space의 Files 패널에 **Open folder**가 표시되는지 확인한다. 상단 **+ → Terminal**로 연 터미널의 실제 시작 경로를 각각 기록한다.
+격리된 프로필에서 폴더가 지정되지 않은 로컬 space와 SSH space를 준비한다. Files를 볼 때는 터미널이 없는 모드 탭을 선택해 각 space의 패널에 **Open folder**가 표시되는지 확인한다. 상단 **+ → Terminal**로 연 터미널의 실제 시작 경로를 각각 기록하고, 폴더 선택과 복원 확인은 모드 탭에서 진행한다.
 
 1. 로컬 패널에서 **Open folder**를 눌러 Windows 폴더 선택 창으로 표시할 합성 폴더를 고른다. SSH 패널에서는 연결된 머신의 절대 경로를 입력해 **Open**을 누른다. 두 루트에 한쪽에서만 보이는 파일을 두고 화면에서 구별한다.
 2. 다른 space로 이동했다 돌아오고 각 탐색 루트를 확인한다. 격리된 Windows Herdr 창을 닫고 앱 프로세스가 종료됐는지 확인한 뒤 같은 프로필로 다시 실행한다. 로컬과 SSH 패널을 각각 열어 저장한 루트가 복원되는지 확인하고 캡처한다.
