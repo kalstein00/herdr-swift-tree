@@ -4,7 +4,7 @@ SwiftTree는 Windows용 Herdr App에서 로컬 NTFS와 SSH Linux 폴더를 탐�
 
 ## 설치 및 업데이트
 
-- **Windows**에서는 네이티브 Herdr App과 PowerShell이 필요합니다. Windows 11 x64, Herdr App 0.1.18, Herdr Core 0.1.22에서 검증했습니다. 설치 스크립트는 Windows의 .NET Framework C# 컴파일러를 사용해 도우미를 빌드하며, 도우미는 Windows의 ICU를 사용합니다. [Herdr App 다운로드](https://herdr.dev/download/)
+- **Windows**에서는 네이티브 Herdr App과 PowerShell이 필요합니다. Windows 11 x64, Herdr App 0.1.18, Herdr Core 0.1.22에서 검증했습니다. 설치 스크립트는 Windows의 .NET Framework C# 컴파일러를 사용해 도우미를 빌드하며, 도우미는 Windows의 ICU를 사용합니다. Windows 로컬 파일의 확대 미리보기에는 Microsoft Edge WebView2 Runtime이 필요합니다. [Herdr App 다운로드](https://herdr.dev/download/) · [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
 - **SSH Linux**를 탐색하려면 먼저 Herdr에 원격 머신을 연결합니다. 원격 머신에는 `sh`, GNU `find`와 `stat`, `sleep`이 필요합니다. SwiftTree 설치는 Windows에서 한 번 수행하면 됩니다. [Herdr 가이드](https://herdr.dev/guide/)
 
 1. 최신 릴리즈에서 `SwiftTree-windows.zip`을 내려받고 압축을 풉니다. `Get-FileHash .\SwiftTree-windows.zip`의 SHA-256을 릴리즈 노트와 비교할 수 있습니다. [최신 릴리즈](https://github.com/kalstein00/herdr-swift-tree/releases/latest)
@@ -37,9 +37,9 @@ Git checkout이나 Perforce sync가 진행되는 동안에도 스크롤과 방�
 
 루트 밖 디렉터리를 가리키는 Windows junction이나 Linux 심볼릭 링크를 펼치면 대상의 파일과 변경을 볼 수 있습니다. 같은 디렉터리를 가리키는 두 링크는 각각 펼칠 수 있습니다. 현재 가지에서 이미 거친 디렉터리로 돌아가는 링크에는 **순환 링크**가 표시되고 그 아래로 펼쳐지지 않습니다. [외부 링크 검증](docs/verification/external-links.md)
 
-파일을 클릭하거나 선택한 파일에서 `Enter`를 누르면 트리 아래에 읽기 전용 미리보기가 열립니다. 미리보기의 **×**를 누르면 트리의 선택을 유지한 채 미리보기만 닫힙니다. 같은 파일을 다시 클릭하거나 `Enter`를 누르면 다시 열립니다. 방향키는 트리의 선택만 옮깁니다. 본문은 파일을 열 때 가져오며 Herdr가 읽을 수 있는 최대 1 MiB의 텍스트 파일을 표시합니다.
+파일을 클릭하거나 선택한 파일에서 `Enter`를 누르면 트리 아래에 읽기 전용 미리보기가 열립니다. 미리보기의 **×**를 누르면 트리의 선택을 유지한 채 미리보기만 닫힙니다. 같은 파일을 다시 클릭하거나 `Enter`를 누르면 다시 열립니다. 방향키는 트리의 선택만 옮깁니다. Windows 로컬 파일에서 아래쪽에 첫 부분만 표시되면 **Showing the start of the file**이 나타납니다. SSH 미리보기의 한도는 1 MiB입니다.
 
-본문이 있는 미리보기에서 **크게 보기**를 누르면 현재 파일을 Herdr 창 중앙에서 첫 줄부터 볼 수 있습니다. 확대 미리보기에는 줄 번호가 나옵니다. Herdr가 지원하는 언어는 구문 강조가 적용되고 그 외의 본문은 일반 텍스트로 보입니다. 읽기 전용 본문을 선택하고 복사할 수 있습니다. `Esc`나 중앙 창의 **×**로 닫으면 아래쪽에서 보던 위치로 돌아옵니다.
+본문이 있는 미리보기에서 **크게 보기**를 누르면 현재 파일을 Herdr 창 중앙에서 첫 줄부터 볼 수 있습니다. Windows 로컬 파일은 CodeMirror에서 1 MiB를 넘어도 끝까지 읽을 수 있습니다. `Ctrl+F`로 검색하고 `Ctrl+End`로 파일 끝으로 이동합니다. 확대 미리보기에는 줄 번호와 지원되는 언어의 구문 강조가 적용됩니다. 읽기 전용 본문을 선택하고 복사할 수 있습니다. `Esc`나 중앙 창의 **×**로 닫으면 아래쪽에서 보던 위치로 돌아옵니다.
 
 ## 기본 Files로 돌아가기
 

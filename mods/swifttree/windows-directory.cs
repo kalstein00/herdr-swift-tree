@@ -117,6 +117,15 @@ internal static class SwiftTreeWindowsDirectory
                 case "start-directory":
                     if (args.Length != 3) return 2;
                     return LaunchWorker("directory-worker", args[1], args[2]);
+                case "start-preview":
+                    if (args.Length != 2) return 2;
+                    return SwiftTreePreviewLauncher.Connect(args[1]);
+                case "warm-preview":
+                    if (args.Length != 2) return 2;
+                    return SwiftTreePreviewLauncher.WarmUp(args[1]);
+                case "stop-preview":
+                    if (args.Length != 2) return 2;
+                    return SwiftTreePreviewLauncher.StopInstalled(args[1]);
                 default:
                     return 2;
             }
@@ -129,6 +138,7 @@ internal static class SwiftTreeWindowsDirectory
         catch (Exception error)
         {
             Console.Error.WriteLine(error.Message);
+            if (args[0] == "start-preview" || args[0] == "warm-preview" || args[0] == "stop-preview") return 1;
             WriteStatus("failed");
         }
         return 0;

@@ -7,21 +7,25 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using System.Web.Script.Serialization;
 
 internal static class SwiftTreeWindowsLocalService
 {
+    public static string Json(object value)
+    {
+        return new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize(value);
+    }
+
     public static int Run(string endpoint, Action ready, Action<TcpClient, NetworkStream> serve)
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         try
         {
             listener.Start(1);
-            var token = new byte[16];
-            using (var random = RandomNumberGenerator.Create()) random.GetBytes(token);
-            var password = Convert.ToBase64String(token);
+            var password = NewPassword();
             var port = ((IPEndPoint)listener.LocalEndpoint).Port;
             File.WriteAllText(endpoint + ".tmp",
-                SwiftTreeWindowsDirectory.Serialize(new { port = port, token = password }));
+                Json(new { port = port, token = password }));
             File.Move(endpoint + ".tmp", endpoint);
             if (ready != null) ready();
 
@@ -54,7 +58,14 @@ internal static class SwiftTreeWindowsLocalService
         }
     }
 
-    private static bool Authenticate(NetworkStream stream, string password)
+    public static string NewPassword()
+    {
+        var token = new byte[16];
+        using (var random = RandomNumberGenerator.Create()) random.GetBytes(token);
+        return Convert.ToBase64String(token);
+    }
+
+    public static bool Authenticate(NetworkStream stream, string password)
     {
         var received = new byte[password.Length];
         int offset = 0;
@@ -69,7 +80,7 @@ internal static class SwiftTreeWindowsLocalService
 
     public static byte[] WireMessage(object value)
     {
-        var json = SwiftTreeWindowsDirectory.Serialize(value);
+        var json = Json(value);
         var ascii = new StringBuilder(json.Length + 1);
         foreach (char character in json)
         {

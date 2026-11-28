@@ -1,0 +1,15 @@
+html {
+  color-scheme: light dark;
+  background: Canvas;
+  color: CanvasText;
+  font: 13px system-ui, sans-serif;
+}
+
+body { display: flex; flex-direction: column; height: 100dvh; margin: 0; }
+header { display: flex; align-items: center; gap: 1rem; padding: 0.55rem 0.9rem; border-bottom: 1px solid GrayText; }
+#filename { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+#state { flex: none; color: GrayText; }
+main { flex: 1; min-height: 0; }
+.cm-editor { height: 100%; }
+.cm-scroller { overflow: auto; font: 14px/1.5 Consolas, monospace !important; }
+.cm-gutters { color: GrayText !important; }

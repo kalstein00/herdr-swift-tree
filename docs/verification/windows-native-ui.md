@@ -1,6 +1,6 @@
 # Windows Herdr UI 검증
 
-실행 중인 Windows Herdr에서 `herdr-app shot`으로 화면을 캡처하고 `status`와 `ls`로 앱 상태를 확인한다. `herdr-app do`에 같은 동작이 있으면 검증 창의 레이아웃, space, pane, 패널을 CLI에서 조작한다. 실제 클릭, 스크롤, 키 바인딩이나 Windows 폴더 선택기를 검증할 때는 Windows Computer Use로 해당 입력을 보낸다. 화면에 변화가 처음 나타난 시각을 측정하는 검증에는 Windows Graphics Capture를 쓴다. [Herdr CLI 조사와 Windows 재현](../research/herdr-screen-inspection.md)
+실행 중인 Windows Herdr에서 `herdr-app shot`으로 화면을 캡처하고 `status`와 `ls`로 앱 상태를 확인한다. `herdr-app do`에 같은 동작이 있으면 검증 창의 레이아웃, space, pane, 패널을 CLI에서 조작한다. SwiftTree의 실제 클릭, 스크롤, 키 바인딩, 폴더 선택은 검증 창에 한정한 Windows 네이티브 입력으로 확인한다. 별도 확대 창과 첫 화면 표시 시각은 Windows Graphics Capture로 캡처한다. [Herdr CLI 조사와 Windows 재현](../research/herdr-screen-inspection.md)
 
 UI TDD에서는 위 경로로 실제 창의 검증 가능 여부를 먼저 확인한다. 회귀 E2E는 같은 동작과 화면 단언으로 수정 전 RED와 수정 후 GREEN을 확인한다. 최종 후보에서도 사용자 경로를 다시 실행하고 캡처한 PNG를 열어 결과를 확인한다.
 
@@ -98,7 +98,7 @@ PNG를 열어 **SwiftTree** 제목과 합성 파일 **Proof.txt**가 같은 패�
 
 Windows 빌드 26300의 새 프로필에서 Herdr App 0.1.18, core 0.1.22로 위 절차를 실행했다. `layout.show`와 `layout.select`가 차례로 성공했고 `status`에서 `swifttree` 레이아웃과 오류·오버레이 0건을 확인했다. 1600×1025 캡처를 열어 `SwiftTree`와 `Proof.txt`를 확인했고 OCR 검사도 통과했다.
 
-## 실제 입력을 검증하는 경우
+## #2 기본 Herdr 네이티브 입력 재현
 
 Computer Use에서 격리된 창을 선택한다. 기존 Herdr 창도 열려 있으면 검증 프로세스의 `MainWindowHandle`을 확인하고 목록에 반환된 창 ID와 대조한다. 클릭 위치와 포커스는 각 동작 직전의 화면으로 확인한다. 아래 경로는 [검증 경로 확인 #2](https://github.com/kalstein00/herdr-swift-tree/issues/2)에서 기본 Files와 명령 팔레트의 입력을 확인할 때 사용했다. SwiftTree의 입력은 해당 후보에서 검증한다.
 
@@ -182,15 +182,28 @@ uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --w
 
 ### 확대 미리보기 검증
 
-같은 NTFS와 SSH 합성 루트에 Herdr가 언어를 식별할 수 없는 확장자의 텍스트 파일을 추가한다. 기존 `alpha.js`는 구문 강조와 줄 번호를 확인하는 데 사용한다. `example.ts`, `.ts`, `.bashrc`, `example.js.erb`로 기본 Files의 언어 별칭과 Herdr가 인식하는 파일명·복합 확장자도 확인한다.
+같은 NTFS와 SSH 합성 루트에 언어를 식별할 수 없는 확장자의 텍스트 파일을 추가한다. 기존 `alpha.js`는 구문 강조와 줄 번호를 확인하는 데 사용한다. `example.ts`, `.ts`, `.bashrc`, `example.js.erb`로 파일명·복합 확장자도 확인한다.
 
 1. `alpha.js`를 열고 방향키로 `bravo.txt`를 선택한 뒤 아래쪽 본문을 휠로 스크롤한다. `inline.png`를 저장하고 제목 줄의 **크게 보기**를 누른다. 기본 1600×1025 프레임에서 클릭 위치는 `(1500, 574)`다. `expanded.png`에 `alpha.js`의 제목과 1번 줄이 나오며 키워드와 문자열에 구문 강조가 적용돼야 한다. 파일 읽기를 관측할 수 있으면 같은 파일을 다시 열 때의 양성 대조와 비교한다.
 2. 확대 화면에서 첫 줄을 선택해 복사하고 클립보드의 전체 문장을 비교한다. 타이핑과 붙여넣기를 한 뒤 같은 문장을 다시 복사하고 원본 파일도 비교한다. 알 수 없는 확장자의 파일을 같은 방법으로 열어 일반 텍스트가 줄 번호와 함께 표시되는지 확인한다.
-3. 확대 화면에서 스크롤한 뒤 `Esc`로 닫고 `returned.png`를 찍는다. 아래 명령으로 아래쪽에서 보던 줄이 유지됐는지 확인한다. 다시 확대하면 1번 줄에서 시작해야 한다. 다시 스크롤한 뒤 중앙의 **×**로 닫아서 같은 확인을 반복한다. 이어서 아래쪽 **×**가 아래 미리보기만 닫는지 확인한다.
+3. 확대 화면에서 스크롤한 뒤 `Esc`로 닫고 `returned.png`를 찍는다. 아래쪽에서 보던 줄과 트리 선택이 유지됐는지 확인한다. 다시 확대하면 1번 줄에서 시작해야 한다. 다시 스크롤한 뒤 중앙의 **×**로 닫아서 같은 확인을 반복한다. 이어서 아래쪽 **×**가 아래 미리보기만 닫는지 확인한다.
 4. 로딩, 빈 파일, 읽기 실패, 표시 불가 상태에는 아래쪽 **×**만 보여야 한다. Files 패널을 좁힌 상태에서 두 버튼이 겹치거나 잘리지 않는지 보고 각각 눌러 확인한다.
+
+아래 명령은 SSH의 Herdr 오버레이 캡처를 비교한다. Windows 로컬 파일은 별도 확대 창이므로 Windows Graphics Capture로 확대 창을 캡처하고 `herdr-app shot`으로 아래쪽 상태를 캡처한다.
 
 ```powershell
 uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --with winrt-Windows.Graphics.Imaging --with winrt-Windows.Storage --with winrt-Windows.Storage.Streams python -B tests/assert_herdr_preview_expand.py inline.png expanded.png --restored returned.png
+```
+
+#### Windows 로컬 대용량 파일
+
+1. 1 MiB에서 1바이트 모자란 파일, 정확히 1 MiB인 파일, 1바이트 초과한 파일, 8 MiB 파일, 32 MiB 파일을 만든다. 파일명에 0을 채운 8자리 바이트 수를 쓴다(예 `01048577.txt`). 첫 줄에는 `TOP SIZE PROOF`와 바이트 크기를, 마지막 줄에는 `END SIZE PROOF`와 바이트 크기를 넣는다. 64 KiB 경계를 UTF-8 한글 문자 중간에 둔 파일도 준비한다.
+2. 격리 Herdr에서 Files를 열고 각 파일을 클릭한다. 아래쪽의 파일명과 **Showing the start of the file**을 확인하고 `inline.png`로 저장한다. **크게 보기**를 눌러 중앙 뷰어의 첫 줄을 캡처한다. `Ctrl+End`로 끝에 가서 마지막 줄도 캡처한다. 아래 명령에서 `1048577`을 검증 파일의 바이트 크기로 바꾼다.
+3. 32 MiB 파일의 끝 문구와 UTF-8 경계 문구를 `Ctrl+F`로 찾는다. 본문 선택과 클립보드 내용을 비교하고 타이핑이나 붙여넣기 뒤에도 같은 본문을 복사할 수 있는지 확인한다. 시작 전과 종료 후 원본 파일의 SHA-256도 비교한다.
+4. 격리 프로필을 시작할 때 `SWIFTTREE_PREVIEW_TRACE`에 작업용 절대 경로를 지정한다. Files를 열기 전에 `prewarm/ready`를 확인한다. 창을 숨겼다가 열 때의 창 핸들, 호스트 PID, 브라우저 PID를 확인한다. 열기 전후에 Herdr의 네이티브 포커스를 확인하고, 격리 Herdr가 종료된 뒤 해당 호스트가 종료되는지 확인한다.
+
+```powershell
+uv run --isolated --python 3.13 --with pillow --with winrt-Windows.Media.Ocr --with winrt-Windows.Graphics.Imaging --with winrt-Windows.Storage --with winrt-Windows.Storage.Streams python -B tests/assert_herdr_large_preview.py 1048577 inline.png --expanded first.png --end last.png
 ```
 
 ## Windows 외부 변경 감시 검증

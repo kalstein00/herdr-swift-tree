@@ -8,12 +8,12 @@ if (-not $AppHome) {
     $AppHome = Join-Path $env:USERPROFILE '.config/herdr-app'
 }
 
-function Find-FilesBlock($Node) {
-    if ($Node.id -eq 'files' -and $Node.type -eq 'block') {
+function Find-LayoutNode($Node, [string]$Id) {
+    if ($Node.id -eq $Id) {
         $Node
     }
     foreach ($child in $Node.children) {
-        Find-FilesBlock $child
+        Find-LayoutNode $child $Id
     }
 }
 
@@ -31,7 +31,17 @@ $modPath = Join-Path $AppHome 'mods/swifttree'
 $env:HERDR_APP_HOME = $AppHome
 
 $lockPath = Join-Path $AppHome '.swifttree-install.lock'
-$lock = [IO.File]::Open($lockPath, 'OpenOrCreate', 'ReadWrite', 'None')
+for ($attempt = 0; ; $attempt++) {
+    try {
+        $lock = [IO.File]::Open($lockPath, 'OpenOrCreate', 'ReadWrite', 'None')
+        break
+    }
+    catch [IO.IOException] {
+        $reason = $_.Exception.GetBaseException().HResult -band 0xffff
+        if ($attempt -ge 65 -or $reason -notin @(32,33)) { throw }
+        Start-Sleep -Milliseconds 100
+    }
+}
 $staging = Join-Path $AppHome ('.swifttree-install-' + [guid]::NewGuid())
 $stagedMod = Join-Path $staging 'candidate'
 $previousMod = Join-Path $staging 'previous'
@@ -54,27 +64,42 @@ try {
     }
 
     $layout = Get-Content -LiteralPath $layoutPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    $blocks = @(Find-FilesBlock $layout)
-    if ($blocks.Count -ne 1 -or $blocks[0].content.mod -notin @('files', 'swifttree')) {
+    $blocks = @(Find-LayoutNode $layout 'files')
+    if ($blocks.Count -ne 1 -or $blocks[0].type -ne 'block' -or $blocks[0].content.mod -notin @('files', 'swifttree')) {
         throw 'The SwiftTree layout must have one Files block with its original ID.'
     }
 
     [IO.Directory]::CreateDirectory($stagedMod) | Out-Null
     foreach ($name in @('main.js', 'mod.json', 'windows-directory.js', 'linux-directory.js',
             'windows-watch.js', 'windows-watch-connection.js', 'linux-watch.js', 'tree-folders.js', 'tree-rows.js',
-            'directory-access.js')) {
+            'directory-access.js', 'windows-preview.js')) {
         Copy-Item -LiteralPath (Join-Path $source $name) -Destination $stagedMod
     }
     & (Join-Path $PSScriptRoot 'build-swifttree-windows.ps1') -OutputPath (Join-Path $stagedMod 'swifttree-windows.exe')
 
-    if ($blocks[0].content.mod -ne 'swifttree') {
+    $layoutChanged = $blocks[0].content.mod -ne 'swifttree'
+    if ($layoutChanged) {
         $blocks[0].content.mod = 'swifttree'
+    }
+    if (!(Find-LayoutNode $layout 'swifttree-preview-warmup')) {
+        $layout.children = @(@{
+            id = 'swifttree-preview-warmup'
+            type = 'block'
+            resizable = $false
+            size = @{ px = 0 }
+            content = @{ mod = 'swifttree'; props = @{ role = 'preview-warmup' } }
+        }) + @($layout.children)
+        $layoutChanged = $true
+    }
+    if ($layoutChanged) {
         $json = $layout | ConvertTo-Json -Depth 100
         [IO.File]::WriteAllText($stagedLayout, $json, [Text.UTF8Encoding]::new($false))
     }
 
     [IO.Directory]::CreateDirectory((Split-Path -Parent $modPath)) | Out-Null
     if ([IO.Directory]::Exists($modPath)) {
+        & (Join-Path $stagedMod 'swifttree-windows.exe') stop-preview $AppHome
+        if ($LASTEXITCODE -ne 0) { throw 'The previous SwiftTree preview host did not exit.' }
         [IO.Directory]::Move($modPath, $previousMod)
     }
     [IO.Directory]::Move($stagedMod, $modPath)

@@ -7,6 +7,7 @@ import { readLinuxMachineState, readLinuxWatch, reconcileLinuxWatch } from "./li
 import { ancestorDirectoryIds, isOpenTreeFolder, makeEntry, openedTreeFolders, releaseEntry, retainEntry, setFolderListing, setFolderOpen } from "./tree-folders.js";
 import { treeRows } from "./tree-rows.js";
 import { readWindowsDirectory } from "./windows-directory.js";
+import { createWindowsPreview, warmWindowsPreview } from "./windows-preview.js";
 import { affectedWindowsFolders } from "./windows-watch.js";
 import { connectWindowsWatcher, readWindowsWatch } from "./windows-watch-connection.js";
 
@@ -102,6 +103,11 @@ function readDirectory(machine, folder, reason, access, ancestors) {
 export default class SwiftTree extends View {
   init(viewProps, cx) {
     const config = props() ?? viewProps;
+    this.previewWarmup = config?.role === "preview-warmup";
+    if (this.previewWarmup) {
+      if (!checking()) cx.spawn(warmWindowsPreview);
+      return;
+    }
     if (config?.overlay && config.role === "expanded-preview") {
       const colors = theme();
       this.expandedPreview = {
@@ -137,6 +143,7 @@ export default class SwiftTree extends View {
     this.previewEditor = null;
     if (!checking()) {
       this.directoryAccess = createDirectoryAccess(cx);
+      this.windowsPreview = createWindowsPreview(cx);
       this.pathInput = InputState.new({ placeholder: "/path/to/folder" });
       this.pathInput.on("submit", (_event, cx) => this.submitRemotePath(this.scope, cx));
       cx.spawn(async () => {
@@ -149,6 +156,7 @@ export default class SwiftTree extends View {
 
   close() {
     this.expandedPreview?.editor.release();
+    this.windowsPreview?.close();
   }
 
   syncRoot(cx) {
@@ -174,6 +182,7 @@ export default class SwiftTree extends View {
     if (this.rootKey === key) return;
 
     this.stopWindowsWatches();
+    this.windowsPreview.hide();
     this.rootKey = key;
     this.root = null;
     this.selected = null;
@@ -576,12 +585,16 @@ export default class SwiftTree extends View {
       this.preview ??= { name: entry.name, status: messages.waiting };
       return;
     }
-    const request = { name: entry.name, status: "Loading preview…" };
+    this.windowsPreview.hide();
+    const request = { name: entry.name, path: entry.path, machine: root.machine, status: "Loading preview…" };
     this.preview = request;
     this.previewRequest = request;
     this.previewEditor ??= EditorState.new({ readonly: true, line_numbers: false, folding: false, soft_wrap: true });
     cx.spawn(async cx => {
-      const content = await readTextFile(entry.path, { on: root.machine }).catch(() => null);
+      const result = root.machine
+        ? await readTextFile(entry.path, { on: root.machine }).then(text => ({ text })).catch(() => null)
+        : await this.windowsPreview.read(entry.path);
+      const content = result?.text;
       const current = () => this.root === root && this.previewRequest === request;
       if (current() && root.remote && content == null) await this.checkRemoteConnection(root, cx);
       if (!current()) return;
@@ -593,6 +606,9 @@ export default class SwiftTree extends View {
         if (content === "") {
           request.status = "Empty file";
         } else {
+          request.partial = result.partial;
+          request.version = result.version;
+          request.prefixHash = result.prefixHash;
           this.previewEditor.set_value(content);
           this.previewEditor.set_selected_range({ start: 0, end: 0 });
           request.status = null;
@@ -603,6 +619,7 @@ export default class SwiftTree extends View {
   }
 
   closePreview(cx) {
+    this.windowsPreview.hide();
     this.previewRequest = null;
     this.preview = null;
     this.lastPreview = null;
@@ -610,8 +627,21 @@ export default class SwiftTree extends View {
     cx.notify();
   }
 
-  openExpandedPreview(preview) {
+  openExpandedPreview(preview, cx) {
     if (this.preview !== preview || preview.status !== null) return;
+    if (!preview.machine) {
+      const attempt = {};
+      preview.expansionAttempt = attempt;
+      const current = () => this.preview === preview && preview.expansionAttempt === attempt;
+      preview.expansionError = false;
+      cx.notify();
+      cx.spawn(async cx => {
+        if (await this.windowsPreview.open(preview, current) || !current()) return;
+        preview.expansionError = true;
+        cx.notify();
+      });
+      return;
+    }
     openOverlay({
       mod: "swifttree",
       kind: "dialog",
@@ -712,8 +742,12 @@ export default class SwiftTree extends View {
         .when(preview.status === null, header => header.child(
           Button.new("expand-preview").h(24).px(8).flex_none().items_center().rounded(5)
             .border_1().border_color(colors.border).text_color(colors.foreground).text_size(12)
-            .hover(style => style.bg(colors.hover)).on_click(() => this.openExpandedPreview(preview)).child("크게 보기")))
+            .hover(style => style.bg(colors.hover)).on_click((_event, cx) => this.openExpandedPreview(preview, cx)).child("크게 보기")))
         .child(previewCloseButton("close-preview", colors, (_event, cx) => this.closePreview(cx))))
+      .when(preview.partial && preview.status === null, panel => panel.child(
+        div().flex_none().px(10).py(3).text_color(colors.muted).child("Showing the start of the file")))
+      .when(preview.expansionError, panel => panel.child(
+        div().flex_none().px(10).py(3).text_color(colors.muted).child("Expanded preview unavailable")))
       .child(content);
   }
 
@@ -728,6 +762,7 @@ export default class SwiftTree extends View {
   }
 
   render(cx) {
+    if (this.previewWarmup) return div();
     if (this.expandedPreview) return this.renderExpandedPreview(theme());
     this.syncRoot(cx);
     const colors = theme();
