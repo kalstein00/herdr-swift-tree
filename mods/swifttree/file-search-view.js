@@ -2,8 +2,8 @@ import { div } from "gpui-kit";
 import { h_flex, Input, InputState, v_flex } from "gpui-base";
 import { appHome, closeOverlay, exec, layout, run, setShared, theme } from "herdr";
 import { createDirectoryAccess } from "./directory-access.js";
-import { collectLocalFiles, matchingFiles } from "./file-search.js";
-import { readWindowsDirectory } from "./windows-directory.js";
+import { collectLocalFiles, matchingFiles, windowsGitSearchScope } from "./file-search.js";
+import { readWindowsDirectory, windowsHelperPath } from "./windows-directory.js";
 
 export const searchSelectionKey = "swifttree-file-search-selection";
 const visibleRows = 9;
@@ -27,7 +27,6 @@ export class FileSearchView {
     this.rows = [];
     this.cursor = 0;
     this.top = 0;
-    this.access = createDirectoryAccess(cx);
     this.input.on("change", (_event, cx) => {
       this.cursor = 0;
       this.top = 0;
@@ -50,31 +49,46 @@ export class FileSearchView {
   }
 
   close() {
+    this.closed = true;
     this.root = null;
-    this.access.close();
+    this.access?.close();
   }
 
   sync(cx) {
+    if (this.closed) return;
     const root = this.resolveRoot();
     if (this.root?.key === root?.key) return;
+    this.access?.close();
     this.root = root;
     this.files = [];
     this.selectedPath = null;
+    this.failed = false;
     this.refresh();
     this.loading = Boolean(root && !root.machine);
     if (!this.loading) return;
     const current = () => this.root === root && this.resolveRoot()?.key === root.key;
     cx.spawn(async cx => {
-      await collectLocalFiles(root.folder,
-        path => readWindowsDirectory(exec, appHome(), path, "search", this.access), current,
-        files => {
-          this.files = files;
-          this.refresh();
+      let access;
+      try {
+        if (!current()) return;
+        access = createDirectoryAccess(cx);
+        this.access = access;
+        await collectLocalFiles(root.folder,
+          path => readWindowsDirectory(exec, appHome(), path, "search", access), current,
+          files => {
+            this.files = files;
+            this.refresh();
+            cx.notify();
+          }, folder => windowsGitSearchScope(exec, windowsHelperPath(appHome()), appHome(), folder));
+      } catch {
+        if (current()) this.failed = true;
+      } finally {
+        access?.close();
+        if (this.access === access) this.access = null;
+        if (current()) {
+          this.loading = false;
           cx.notify();
-        });
-      if (current()) {
-        this.loading = false;
-        cx.notify();
+        }
       }
     });
   }
@@ -92,6 +106,7 @@ export class FileSearchView {
       }
     }
     if (this.resolveRoot()?.key === selection.root) setShared(searchSelectionKey, selection);
+    this.close();
     closeOverlay(this.id);
   }
 
@@ -103,6 +118,7 @@ export class FileSearchView {
       .on_key_down((event, cx) => {
         if (event.key === "escape") {
           cx.stop_propagation();
+          this.close();
           closeOverlay(this.id);
         } else if (event.key === "up" || event.key === "down") {
           cx.stop_propagation();
@@ -118,7 +134,8 @@ export class FileSearchView {
         .rounded(5).text_color(colors.foreground));
     if (!this.input.value().trim()) return panel;
     if (!this.rows.length) {
-      const message = this.loading ? "파일 검색 중…" : "일치하는 파일이 없습니다";
+      const message = this.loading ? "파일 검색 중…" :
+        this.failed ? "파일 목록을 읽을 수 없습니다" : "일치하는 파일이 없습니다";
       return panel.child(div().px(9).py(5).text_color(colors.muted).child(message));
     }
     panel.children(this.rows.slice(this.top, this.top + visibleRows).map(({ file, hits }, index) =>

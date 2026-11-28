@@ -1,7 +1,9 @@
 ﻿param(
     [Parameter(Mandatory)][int]$WindowProcessId,
     [Parameter(Mandatory)][string]$EvidenceDirectory,
-    [string]$AlternateRoot
+    [string]$AlternateRoot,
+    [switch]$GitScope,
+    [switch]$GitRepositoryRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -99,6 +101,23 @@ if ($after.errors.Count -or $after.space -ne $before.space) {
 }
 if ($after.overlays -notcontains 'swifttree') {
     throw "Ctrl+P did not open the file search overlay. Capture: $capturePath"
+}
+
+if ($GitScope) {
+    Send-HerdrKeys @('50', '4f', '4c', '49', '43', '59')
+    $excluded = @('PolicyIgnored.txt', 'PolicyNested.txt')
+    $visible = @('PolicyKeep.txt')
+    $name = 'search-git-policy'
+    if ($GitRepositoryRoot) {
+        $visible += 'PolicyOutside.txt'
+        $name = 'search-git-policy-root'
+    } else {
+        $excluded += 'PolicyOutside.txt'
+    }
+    Assert-HerdrText $name @(410, 80, 780, 250) $visible $excluded
+    Send-HerdrKeys @('0d')
+    Assert-HerdrText "$name-preview" @(1130, 550, 450, 230) @('GIT KEEP PREVIEW PROOF')
+    return
 }
 
 Send-HerdrKeys @('5a', '5a', '5a')

@@ -52,6 +52,7 @@ $stagedKeys = Join-Path $staging 'keys.json'
 $previousKeys = Join-Path $staging 'keys.previous.json'
 $keepStaging = $false
 $modInstalled = $false
+$installComplete = $false
 
 try {
     if (-not (Test-Path -LiteralPath $layoutPath -PathType Leaf)) {
@@ -129,6 +130,7 @@ try {
     }
 
     Invoke-HerdrLayout @('do', 'layout.switch', '--name', 'swifttree')
+    $installComplete = $true
 }
 catch {
     $installFailure = $_
@@ -161,8 +163,12 @@ finally {
                     break
                 }
                 catch [IO.IOException], [UnauthorizedAccessException] {
-                    # The previous native watcher exits when the old Mod's socket closes.
-                    if ($attempt -ge 20) { throw }
+                    # The previous native worker can hold its image until its socket closes.
+                    if ($attempt -ge 20) {
+                        if (!$installComplete) { throw }
+                        Write-Warning "SwiftTree is installed. The previous helper is still in use. Its staging folder can be removed after Herdr exits: $staging"
+                        break
+                    }
                     Start-Sleep -Milliseconds 100
                 }
             }

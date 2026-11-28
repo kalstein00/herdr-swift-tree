@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
 using Microsoft.Win32.SafeHandles;
 
@@ -110,6 +111,9 @@ internal static class SwiftTreeWindowsDirectory
                 case "sort-linux":
                     listing = DecodeLinuxListing(File.ReadAllText(args[1]));
                     break;
+                case "git-search-scope":
+                    if (args.Length != 3) return 2;
+                    return WriteGitSearchScope(args[1], args[2]);
                 case "start-watch":
                     if (args.Length != 3 && args.Length != 4) return 2;
                     return LaunchWorker("watch-worker", args[1], args[args.Length - 1],
@@ -138,10 +142,128 @@ internal static class SwiftTreeWindowsDirectory
         catch (Exception error)
         {
             Console.Error.WriteLine(error.Message);
-            if (args[0] == "start-preview" || args[0] == "warm-preview" || args[0] == "stop-preview") return 1;
+            if (args[0] == "start-preview" || args[0] == "warm-preview" || args[0] == "stop-preview" ||
+                args[0] == "git-search-scope") return 1;
             WriteStatus("failed");
         }
         return 0;
+    }
+
+    private static Process StartGit(string executable, string folder, string arguments)
+    {
+        var start = new ProcessStartInfo(executable, arguments)
+        {
+            WorkingDirectory = folder,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        start.EnvironmentVariables["LC_ALL"] = "C";
+        return Process.Start(start);
+    }
+
+    private static int WriteGitSearchScope(string folder, string output)
+    {
+        ReclaimGitSearchScratch(Path.GetDirectoryName(output));
+        var git = (Environment.GetEnvironmentVariable("PATH") ?? "")
+            .Split(Path.PathSeparator)
+            .Select(directory => directory.Trim().Trim('"'))
+            .Where(Path.IsPathRooted)
+            .Select(directory => Path.Combine(directory, "git.exe"))
+            .FirstOrDefault(File.Exists);
+        if (git == null) return 44;
+
+        using (var probe = StartGit(git, folder, "rev-parse --is-inside-work-tree"))
+        {
+            var error = probe.StandardError.ReadToEndAsync();
+            var result = probe.StandardOutput.ReadToEnd();
+            probe.WaitForExit();
+            if (probe.ExitCode != 0)
+                return error.Result.Contains("not a git repository") ? 44 : 1;
+            if (result.Trim() != "true") return 44;
+        }
+        bool ignoreCase;
+        using (var config = StartGit(git, folder, "config --bool --get core.ignorecase"))
+        {
+            var error = config.StandardError.ReadToEndAsync();
+            var value = config.StandardOutput.ReadToEnd();
+            config.WaitForExit();
+            if (config.ExitCode > 1) { Console.Error.WriteLine(error.Result); return 1; }
+            ignoreCase = value.Trim() == "true";
+        }
+        using (var list = StartGit(git, folder, "ls-files -z --cached --others --exclude-standard"))
+        {
+            var error = list.StandardError.ReadToEndAsync();
+            int chunks = WriteGitChunks(list.StandardOutput.BaseStream, output);
+            list.WaitForExit();
+            if (list.ExitCode != 0) Console.Error.WriteLine(error.Result);
+            else Console.WriteLine(Serialize(new { chunks = chunks, ignoreCase = ignoreCase }));
+            return list.ExitCode == 0 ? 0 : 1;
+        }
+    }
+
+    private static void ReclaimGitSearchScratch(string home)
+    {
+        var cutoff = DateTime.UtcNow.AddMinutes(-10);
+        foreach (var directory in new DirectoryInfo(home).EnumerateDirectories(".swifttree-search-*"))
+        {
+            try
+            {
+                if (!Regex.IsMatch(directory.Name, @"^\.swifttree-search-[0-9]{13}-[a-z0-9]+$") ||
+                    directory.LastWriteTimeUtc >= cutoff ||
+                    (directory.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                foreach (var file in directory.EnumerateFiles())
+                {
+                    int chunk;
+                    if (Int32.TryParse(file.Name, NumberStyles.None, CultureInfo.InvariantCulture, out chunk))
+                        file.Delete();
+                }
+                directory.Delete();
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static int WriteGitChunks(Stream source, string output)
+    {
+        var buffer = new byte[64 * 1024];
+        int chunks = 0;
+        FileStream destination = null;
+        try
+        {
+            int count;
+            while ((count = source.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                int split = count;
+                bool rotate = false;
+                if (destination != null && destination.Length + count >= 1024 * 1024)
+                {
+                    int boundary = Array.LastIndexOf(buffer, (byte)0, count - 1, count);
+                    if (boundary >= 0) { split = boundary + 1; rotate = true; }
+                }
+                if (destination == null)
+                    destination = CreateGitChunk(output, chunks++);
+                destination.Write(buffer, 0, split);
+                if (!rotate) continue;
+                destination.Dispose();
+                destination = null;
+                if (split < count)
+                {
+                    destination = CreateGitChunk(output, chunks++);
+                    destination.Write(buffer, split, count - split);
+                }
+            }
+        }
+        finally { if (destination != null) destination.Dispose(); }
+        return chunks;
+    }
+
+    private static FileStream CreateGitChunk(string directory, int index)
+    {
+        return new FileStream(Path.Combine(directory, index.ToString(CultureInfo.InvariantCulture)),
+                              FileMode.CreateNew, FileAccess.Write);
     }
 
     private static void WriteStatus(string status)

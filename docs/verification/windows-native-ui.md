@@ -252,3 +252,5 @@ uv run --isolated --python 3.13 --with opencv-python --with numpy --with windows
 1600×1025 격리 창에서 로컬 NTFS 탐색 루트의 Alpha와 Bravo 폴더에 각각 tree-rows.js를 둔다. 본문은 각각 ALPHA PREVIEW PROOF와 BRAVO PREVIEW PROOF다. 같은 루트의 build에는 ScopeBuild.txt를, .git에는 ScopeGit.txt를 둔다. 루트 밖 ScopeLink.txt가 든 폴더를 junction으로 연결한다. 두 번째 루트에는 ScopeAlternate.txt를 둔다.
 
 SwiftTree를 설치한 뒤 원래 루트의 터미널을 포커스하고, PowerShell 7에서 검증 창 PID와 캡처 폴더를 windows-file-search.ps1에 넘긴다. AlternateRoot는 두 번째 루트의 절대 경로다. 테스트는 Win32 키·마우스 입력으로 Ctrl+P, 파일명 입력, 선택과 취소를 수행하고 Herdr 캡처와 터미널 출력으로 결과를 확인한다.
+
+Git 검증은 -GitScope를 사용한다. 합성 Git 저장소의 sub/nested에 PolicyKeep.txt(본문 GIT KEEP PREVIEW PROOF), PolicyIgnored.txt, PolicyNested.txt를 둔다. 루트와 nested의 .gitignore로 각각 무시 대상을 지정한다. 루트에는 PolicyOutside.txt를 둔다. 저장소 루트에서 -GitScope -GitRepositoryRoot, sub에서는 -GitScope를 실행해 상대 범위와 미리보기 본문을 확인한다.
